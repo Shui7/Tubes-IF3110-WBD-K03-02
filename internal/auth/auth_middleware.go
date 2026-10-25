@@ -73,3 +73,14 @@ func (m *AuthMiddleware) RequireRole(role string, next http.Handler) http.Handle
 		next.ServeHTTP(w, r)
 	})
 }
+
+func (m *AuthMiddleware) RequireAdmin(next http.Handler) http.Handler {
+	return m.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, _ := r.Context().Value(SessionContextKey).(*Session)
+		if session == nil || session.Role != "Admin" {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+}

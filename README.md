@@ -94,8 +94,6 @@ POSTGRES_DB=dbplatform
 DATABASE_URL=host=dbplatform port=5432 dbname=dbplatform user=postgres password=replace-with-a-local-password sslmode=disable
 ```
 
-Do not commit real credentials or a populated `.env` file.
-
 ## Development
 
 Run the Go test suite:
