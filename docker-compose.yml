@@ -1,18 +1,35 @@
 services:
-  db:
+  dbplatform:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-dbplatform}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/platform/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  dbsamples:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DBSAMPLES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DBSAMPLES_PASSWORD:-postgres}
+      POSTGRES_DB: ${DBSAMPLES_DB:-dbsamples}
+    ports:
+      - "${DBSAMPLES_PORT:-5433}:5432"
+    volumes:
+      - samplesdata:/var/lib/postgresql/data
+      - ./db/sample:/sample:ro
+      - ./db/init-samples.sh:/docker-entrypoint-initdb.d/init-samples.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DBSAMPLES_USER:-postgres} -d ${DBSAMPLES_DB:-dbsamples}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,14 +40,16 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-host=db port=5432 dbname=dbplatform user=postgres password=postgres sslmode=disable}
+      DATABASE_URL: ${DATABASE_URL:-host=dbplatform port=5432 dbname=dbplatform user=postgres password=postgres sslmode=disable}
       ADDR: ${ADDR:-:8080}
     ports:
       - "${APP_PORT:-8080}:8080"
     depends_on:
-      db:
+      dbplatform:
+        condition: service_healthy
+      dbsamples:
         condition: service_healthy
 
 volumes:
   pgdata:
-
+  samplesdata:
