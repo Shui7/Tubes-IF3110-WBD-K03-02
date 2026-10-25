@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
@@ -18,6 +20,7 @@ func main() {
 	http.HandleFunc("/", home)
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/admin", admin)
+	http.HandleFunc("/databases", databases)
 	http.HandleFunc("/databases/", databases)
 
 	log.Println("Listening at http://localhost:8080")
@@ -28,7 +31,6 @@ func main() {
 }
 
 func currentUser() web.BaseData {
-	// placeholder
 	return web.BaseData{
 		Name: "John User",
 		Role: "Admin",
@@ -45,7 +47,6 @@ func home(w http.ResponseWriter, r *http.Request) {
 
 func login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		// Placeholder for login authentication logic
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -60,9 +61,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 func admin(w http.ResponseWriter, r *http.Request) {
 	tab := r.URL.Query().Get("tab")
-	if tab == "" && r.URL.Path == "/admin/connections" {
-		tab = "connections"
-	}
 
 	adminUser := currentUser()
 	adminUser.Role = "Admin"
@@ -71,9 +69,9 @@ func admin(w http.ResponseWriter, r *http.Request) {
 		BaseData:  adminUser,
 		ActiveTab: tab,
 		Connections: []web.DBConnectionItem{
-			{ID: 1, Host: "db", Port: 5432, Database: "sales_db", User: "postgres", Status: "Connected"},
-			{ID: 2, Host: "db", Port: 5432, Database: "reports_db", User: "postgres", Status: "Connected"},
-			{ID: 3, Host: "archive.internal", Port: 5432, Database: "archive_db", User: "db_admin", Status: "Failed"},
+			{ID: 1, Database: "sales_db", Host: "db", Port: 5432, User: "postgres", Status: "Connected"},
+			{ID: 2, Database: "reports_db", Host: "db", Port: 5432, User: "postgres", Status: "Connected"},
+			{ID: 3, Database: "archive_db", Host: "archive.internal", Port: 5432, User: "db_admin", Status: "Failed"},
 		},
 		Groups: []web.GroupItem{
 			{ID: 1, Name: "engineering", MemberCount: 3},
@@ -97,12 +95,82 @@ func admin(w http.ResponseWriter, r *http.Request) {
 }
 
 func databases(w http.ResponseWriter, r *http.Request) {
-	// placeholder
-	web.RenderTemplate(w, "databases.html", web.DatabasesData{
+	subPath := strings.TrimPrefix(r.URL.Path, "/databases")
+	subPath = strings.Trim(subPath, "/")
+
+	if subPath == "" {
+		web.RenderTemplate(w, "databases.html", web.DatabasesData{
+			BaseData: currentUser(),
+			Databases: []web.DatabaseItem{
+				{ID: 1, Name: "sales_db", AccessLevel: "edit"},
+				{ID: 2, Name: "reports_db", AccessLevel: "view"},
+			},
+		})
+		return
+	}
+
+	parts := strings.Split(subPath, "/")
+	id, err := strconv.Atoi(parts[0])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	tab := r.URL.Query().Get("tab")
+	table := r.URL.Query().Get("table")
+	if table == "" {
+		table = "orders"
+	}
+
+	dbName := "sales_db"
+	accessLevel := "edit"
+	if id == 2 {
+		dbName = "reports_db"
+		accessLevel = "view"
+	}
+
+	web.RenderTemplate(w, "databasedetail.html", web.DatabaseDetailData{
 		BaseData: currentUser(),
-		Databases: []web.DatabaseItem{
-			{ID: 1, Name: "sales_db", AccessLevel: "edit"},
-			{ID: 2, Name: "reports_db", AccessLevel: "view"},
+		Database: web.DatabaseItem{
+			ID:          id,
+			Name:        dbName,
+			AccessLevel: accessLevel,
 		},
+		Tables: []web.TableSummary{
+			{Name: "orders", RowCount: 1250},
+			{Name: "order_items", RowCount: 4830},
+			{Name: "products", RowCount: 320},
+			{Name: "customers", RowCount: 910},
+		},
+		SelectedTable: table,
+		Columns: []web.ColumnItem{
+			{Name: "id", Type: "integer", Nullable: false, Default: "nextval('orders_id_seq')", IsPK: true},
+			{Name: "customer_id", Type: "integer", Nullable: false, Default: "", IsPK: false},
+			{Name: "order_date", Type: "timestamp with time zone", Nullable: false, Default: "now()", IsPK: false},
+			{Name: "total_amount", Type: "numeric(10,2)", Nullable: false, Default: "0.00", IsPK: false},
+			{Name: "status", Type: "character varying(50)", Nullable: false, Default: "'pending'", IsPK: false},
+		},
+		Constraints: []web.ConstraintItem{
+			{Name: "orders_pkey", Type: "PRIMARY KEY", Definition: "PRIMARY KEY (id)"},
+			{Name: "fk_orders_customer", Type: "FOREIGN KEY", Definition: "FOREIGN KEY (customer_id) REFERENCES customers(id)"},
+			{Name: "chk_total_amount", Type: "CHECK", Definition: "CHECK (total_amount >= 0)"},
+		},
+		Indexes: []web.IndexItem{
+			{Name: "orders_pkey", Columns: "id", Type: "BTREE", Unique: true},
+			{Name: "idx_orders_customer_id", Columns: "customer_id", Type: "BTREE", Unique: false},
+			{Name: "idx_orders_date", Columns: "order_date", Type: "BTREE", Unique: false},
+		},
+		DataHeaders: []string{"id", "customer_id", "order_date", "total_amount", "status"},
+		DataRows: [][]string{
+			{"1", "101", "2026-03-01 10:14:00+00", "150.00", "completed"},
+			{"2", "104", "2026-03-02 14:22:30+00", "89.50", "completed"},
+			{"3", "108", "2026-03-03 09:05:12+00", "340.00", "processing"},
+			{"4", "112", "2026-03-04 16:45:00+00", "25.00", "pending"},
+		},
+		Migrations: []web.MigrationHistoryItem{
+			{Version: "001", Name: "001_initial_schema", ExecutedBy: "admin", ExecutedAt: "2026-01-10 09:00:00", Status: "success", SQL: "CREATE TABLE customers (...); CREATE TABLE orders (...);"},
+			{Version: "002", Name: "002_add_order_status_index", ExecutedBy: "johndoe", ExecutedAt: "2026-02-15 11:30:00", Status: "success", SQL: "CREATE INDEX idx_orders_status ON orders(status);"},
+		},
+		ActiveTab: tab,
 	})
 }

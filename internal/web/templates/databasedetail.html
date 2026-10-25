@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>{{ .Database.Name }} | Database Management Platform</title>
+</head>
+<body>
+    <header class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/databases" class="active">Databases</a>
+            <a href="/admin">Admin</a>
+        </nav>
+        <div class="nav-right">
+            <span class="muted mono">{{ .Name }}</span>
+            <form method="POST" action="/logout">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+        </div>
+    </header>
+
+    <main>
+        <a href="/databases" class="back-link">← Back to Databases</a>
+
+        <div class="page-header">
+            <div>
+                <h1>{{ .Database.Name }}</h1>
+            </div>
+            <div>
+                {{ if eq .Database.AccessLevel "edit" }}
+                <span class="badge badge-edit">View + Edit</span>
+                {{ else }}
+                <span class="badge badge-view">View Only</span>
+                {{ end }}
+            </div>
+        </div>
+
+        {{ with .Error }}
+        <div class="alert alert-error">{{ . }}</div>
+        {{ end }}
+        {{ with .Success }}
+        <div class="alert alert-success">{{ . }}</div>
+        {{ end }}
+
+        <div class="tabs" id="detail-tabs">
+            <a href="#schema" class="tab-link active" data-tab="schema">Schema</a>
+            <a href="#data" class="tab-link" data-tab="data">Data</a>
+            <a href="#migrations" class="tab-link" data-tab="migrations">Migrations</a>
+        </div>
+
+        <section id="tab-schema" class="tab-content">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+                {{ range .Tables }}
+                <a href="?table={{ .Name }}#schema" class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
+                    {{ .Name }}
+                </a>
+                {{ end }}
+            </div>
+
+            <h2>Table: <span class="mono">{{ .SelectedTable }}</span></h2>
+
+            <h3>Columns</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Column</th>
+                            <th>Type</th>
+                            <th>Nullable</th>
+                            <th>Default</th>
+                            <th>Key</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Columns }}
+                            {{ range .Columns }}
+                            <tr>
+                                <td class="mono font-bold">{{ .Name }}</td>
+                                <td class="mono">{{ .Type }}</td>
+                                <td>{{ if .Nullable }}YES{{ else }}NO{{ end }}</td>
+                                <td class="mono">{{ if .Default }}{{ .Default }}{{ else }}<span class="null">-</span>{{ end }}</td>
+                                <td>{{ if .IsPK }}<span class="badge badge-edit">PK</span>{{ else }}-{{ end }}</td>
+                            </tr>
+                            {{ end }}
+                        {{ else }}
+                            <tr>
+                                <td colspan="5" class="empty center">No column information available.</td>
+                            </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Constraints</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Constraint Name</th>
+                            <th>Type</th>
+                            <th>Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Constraints }}
+                            {{ range .Constraints }}
+                            <tr>
+                                <td class="mono">{{ .Name }}</td>
+                                <td><span class="badge">{{ .Type }}</span></td>
+                                <td class="mono">{{ .Definition }}</td>
+                            </tr>
+                            {{ end }}
+                        {{ else }}
+                            <tr>
+                                <td colspan="3" class="empty center">No constraints found.</td>
+                            </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Indexes</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Index Name</th>
+                            <th>Columns</th>
+                            <th>Type</th>
+                            <th>Unique</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Indexes }}
+                            {{ range .Indexes }}
+                            <tr>
+                                <td class="mono">{{ .Name }}</td>
+                                <td class="mono">{{ .Columns }}</td>
+                                <td>{{ .Type }}</td>
+                                <td>{{ if .Unique }}YES{{ else }}NO{{ end }}</td>
+                            </tr>
+                            {{ end }}
+                        {{ else }}
+                            <tr>
+                                <td colspan="4" class="empty center">No indexes found.</td>
+                            </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="tab-data" class="tab-content" style="display: none;">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+                {{ range .Tables }}
+                <a href="?table={{ .Name }}#data" class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
+                    {{ .Name }}
+                </a>
+                {{ end }}
+            </div>
+
+            <h2>Data: <span class="mono">{{ .SelectedTable }}</span></h2>
+
+            <div class="table-wrap data">
+                <table>
+                    <thead>
+                        <tr>
+                            {{ range .DataHeaders }}
+                            <th>{{ . }}</th>
+                            {{ end }}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .DataRows }}
+                            {{ range .DataRows }}
+                            <tr>
+                                {{ range . }}
+                                <td>{{ if eq . "" }}<span class="null">NULL</span>{{ else }}{{ . }}{{ end }}</td>
+                                {{ end }}
+                            </tr>
+                            {{ end }}
+                        {{ else }}
+                            <tr>
+                                <td colspan="{{ len .DataHeaders }}" class="empty center">No rows found in this table.</td>
+                            </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <button type="button" class="btn btn-outline btn-sm" disabled>Previous</button>
+                <span>Page 1 of 1</span>
+                <button type="button" class="btn btn-outline btn-sm" disabled>Next</button>
+            </div>
+        </section>
+
+        <section id="tab-migrations" class="tab-content" style="display: none;">
+            <h2>Migration History</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Description</th>
+                            <th>Executed By</th>
+                            <th>Executed At</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Migrations }}
+                            {{ range .Migrations }}
+                            <tr>
+                                <td class="mono font-bold">{{ .Version }}</td>
+                                <td>{{ .Name }}</td>
+                                <td>{{ .ExecutedBy }}</td>
+                                <td class="mono">{{ .ExecutedAt }}</td>
+                                <td>
+                                    {{ if eq .Status "success" }}
+                                    <span class="badge badge-success">Success</span>
+                                    {{ else }}
+                                    <span class="badge badge-failed">Failed</span>
+                                    {{ end }}
+                                </td>
+                            </tr>
+                            {{ end }}
+                        {{ else }}
+                            <tr>
+                                <td colspan="5" class="empty center">No migration history recorded.</td>
+                            </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            {{ if eq .Database.AccessLevel "edit" }}
+            <div class="form-card mt-1">
+                <h3>Create Migration</h3>
+                <form method="POST" action="/databases/{{ .Database.ID }}/migrations">
+                    <input type="hidden" name="csrf_token" value="">
+
+                    <div class="form-group">
+                        <label for="migration_name">Migration Name</label>
+                        <input type="text" id="migration_name" name="name" required placeholder="e.g. 002_add_discount_column">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="migration_sql">Migration SQL</label>
+                        <textarea id="migration_sql" class="sql-editor" name="sql" rows="8" placeholder="ALTER TABLE orders ADD COLUMN discount NUMERIC(10, 2) DEFAULT 0.00;"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Execute Migration</button>
+                    </div>
+                </form>
+            </div>
+            {{ else }}
+            <div class="alert alert-warning">
+                Access is View Only. Migration creation and execution require View + Edit access.
+            </div>
+            {{ end }}
+        </section>
+    </main>
+
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+
+    <script>
+        (function () {
+            const tabs = document.querySelectorAll('#detail-tabs .tab-link');
+            const sections = document.querySelectorAll('.tab-content');
+
+            function switchTab(targetTab) {
+                tabs.forEach(t => {
+                    if (t.dataset.tab === targetTab) {
+                        t.classList.add('active');
+                    } else {
+                        t.classList.remove('active');
+                    }
+                });
+
+                sections.forEach(s => {
+                    if (s.id === 'tab-' + targetTab) {
+                        s.style.display = 'block';
+                    } else {
+                        s.style.display = 'none';
+                    }
+                });
+            }
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const tabKey = this.dataset.tab;
+
+                    history.replaceState(null, '', window.location.pathname + '#' + tabKey);
+                    switchTab(tabKey);
+                });
+            });
+
+            const hash = window.location.hash.replace('#', '');
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryTab = urlParams.get('tab');
+            const initialTab = hash || queryTab || '{{ .ActiveTab }}' || 'schema';
+
+            if (document.getElementById('tab-' + initialTab)) {
+                switchTab(initialTab);
+            }
+        })();
+    </script>
+</body>
+</html>

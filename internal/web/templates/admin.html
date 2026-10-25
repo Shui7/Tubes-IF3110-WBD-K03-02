@@ -144,7 +144,6 @@
                     <thead>
                         <tr>
                             <th>Group Name</th>
-                            <th>Description</th>
                             <th>Members Count</th>
                             <th class="text-right">Actions</th>
                         </tr>
@@ -154,7 +153,6 @@
                         {{ range .Groups }}
                         <tr>
                             <td class="mono font-bold"><strong>{{ .Name }}</strong></td>
-                            <td>{{ .Description }}</td>
                             <td><span class="badge">{{ .MemberCount }} members</span></td>
                             <td class="text-right">
                                 <button type="button" class="btn btn-outline btn-sm">Edit</button>
@@ -361,7 +359,7 @@
                             <select id="perm_db" name="database_id" required>
                                 <option value="">-- Select Database --</option>
                                 {{ range .Connections }}
-                                <option value="{{ .ID }}">{{ .Name }} ({{ .Database }})</option>
+                                <option value="{{ .ID }}">{{ .Database }}</option>
                                 {{ end }}
                             </select>
                         </div>

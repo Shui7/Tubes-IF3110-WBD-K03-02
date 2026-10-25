@@ -35,7 +35,7 @@ type DBConnectionItem struct {
 	Host     string
 	Port     int
 	User     string
-	Status   string // "Connected", "Failed", "Untested"
+	Status   string // "Connected", "Failed"
 }
 
 type GroupItem struct {
@@ -68,6 +68,55 @@ type AdminData struct {
 	Groups      []GroupItem
 	Users       []UserItem
 	Permissions []GroupPermissionItem
+}
+
+type ColumnItem struct {
+	Name     string
+	Type     string
+	Nullable bool
+	Default  string
+	IsPK     bool
+}
+
+type ConstraintItem struct {
+	Name       string
+	Type       string
+	Definition string
+}
+
+type IndexItem struct {
+	Name    string
+	Columns string
+	Type    string
+	Unique  bool
+}
+
+type TableSummary struct {
+	Name     string
+	RowCount int64
+}
+
+type MigrationHistoryItem struct {
+	Version    string
+	Name       string
+	ExecutedBy string
+	ExecutedAt string
+	Status     string
+	SQL        string
+}
+
+type DatabaseDetailData struct {
+	BaseData
+	Database      DatabaseItem
+	Tables        []TableSummary
+	SelectedTable string
+	Columns       []ColumnItem
+	Constraints   []ConstraintItem
+	Indexes       []IndexItem
+	DataHeaders   []string
+	DataRows      [][]string
+	Migrations    []MigrationHistoryItem
+	ActiveTab     string
 }
 
 //go:embed templates/*.html
