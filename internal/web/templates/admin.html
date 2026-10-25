@@ -97,21 +97,19 @@
 
             <div class="form-card mt-1">
                 <h3>Add PostgreSQL Connection</h3>
-                <p class="muted">Register a new target PostgreSQL database instance for management.</p>
-
                 <form method="POST" action="/admin/connections/add">
                     <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
 
                     <div class="form-group">
                         <label for="conn_database">Database Name</label>
-                        <input type="text" id="conn_database" name="database" required placeholder="e.g. sales_db">
+                        <input type="text" id="conn_database" name="database" required placeholder="e.g. film, airport">
                     </div>
 
                     <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 1rem;">
                         <div class="form-group">
                             <label for="conn_host">Host</label>
                             <input type="text" id="conn_host" name="host" required
-                                placeholder="localhost or db.internal">
+                                placeholder="dbsamples">
                         </div>
                         <div class="form-group">
                             <label for="conn_port">Port</label>

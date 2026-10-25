@@ -12,7 +12,7 @@ for f in /sample/*.sql; do
     psql -v ON_ERROR_STOP=0 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "CREATE DATABASE \"$dbname\";" || true
 
     echo "Importing $fname into database $dbname..."
-    psql -v ON_ERROR_STOP=0 --username "$POSTGRES_USER" --dbname "$dbname" -f "$f" || true
+    psql -v ON_ERROR_STOP=0 --quiet --username "$POSTGRES_USER" --dbname "$dbname" -f "$f" || true
     echo "Finished processing $dbname"
 done
 

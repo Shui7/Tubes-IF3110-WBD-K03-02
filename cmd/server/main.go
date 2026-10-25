@@ -109,7 +109,7 @@ func main() {
 func currentUser(r *http.Request) web.BaseData {
 	session, ok := r.Context().Value(auth.SessionContextKey).(*auth.Session)
 	if !ok || session == nil {
-		return web.BaseData{Name: "", Role: "Guest"}
+		return web.BaseData{Name: "Guest", Role: "Guest"}
 	}
 
 	return web.BaseData{
@@ -185,7 +185,7 @@ func databases(w http.ResponseWriter, r *http.Request) {
 	renderDatabaseDetail(id, w, r)
 }
 
-func renderDatabases(w http.ResponseWriter, r * http.Request) {
+func renderDatabases(w http.ResponseWriter, r *http.Request) {
 	data := web.DatabasesData{BaseData: currentUser(r)}
 	if platformDB == nil {
 		data.Error = "Platform database is unavailable."
