@@ -65,7 +65,7 @@ func main() {
 	authHandler = auth.NewAuthHandler(platformDB, sessionStore)
 	authMiddleware = auth.NewAuthMiddleware(sessionStore)
 
-	http.HandleFunc("/", home)
+	http.Handle("/", authMiddleware.RequireAuth(http.HandlerFunc(home)))
 	http.HandleFunc("/login", authHandler.HandleLogin)
 	http.HandleFunc("/logout", logout)
 	http.Handle("/admin", authMiddleware.RequireAuth(http.HandlerFunc(adminPage)))
