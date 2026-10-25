@@ -49,7 +49,7 @@ func GetPermissions(db *sql.DB) ([]web.GroupPermissionItem, error) {
 		SELECT gda.id, gda.group_id, g.name, 
 		       COALESCE(gda.database_id, gda.db_id, dc.id), 
 		       COALESCE(NULLIF(dc.database_name, ''), NULLIF(dc.name, ''), dc.dbname, ''), 
-		       COALESCE(NULLIF(gda.access_level, ''), gda.access::text, 'view')
+		       COALESCE(NULLIF(gda.access_level, ''), 'view')
 		FROM group_database_access gda
 		JOIN groups g ON gda.group_id = g.id
 		JOIN database_connections dc ON (gda.database_id = dc.id OR gda.db_id = dc.id)
