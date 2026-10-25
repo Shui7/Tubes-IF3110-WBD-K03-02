@@ -14,7 +14,9 @@
         <nav class="nav-links">
             <a href="/">Home</a>
             <a href="/databases">Databases</a>
+            {{ if eq .Role "Admin" }}
             <a href="/admin" class="active">Admin</a>
+            {{ end }}
         </nav>
         <div class="nav-right">
             <span class="muted mono">{{ .Name }} ({{ .Role }})</span>

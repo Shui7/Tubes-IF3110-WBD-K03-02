@@ -16,7 +16,17 @@
             <a href="/databases">Databases</a>
         </nav>
         <div class="nav-right">
-            <a href="/login" class="btn btn-outline btn-sm">Login</a>
+            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
+            {{ if eq .Role "Guest" }}
+            <div class="nav-right">
+                <a href="/login" class="btn btn-outline btn-sm active">Login</a>
+            </div>
+            {{ else }}
+            <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+            {{ end }}
         </div>
     </header>
 

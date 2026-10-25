@@ -14,7 +14,9 @@
         <nav class="nav-links">
             <a href="/">Home</a>
             <a href="/databases">Databases</a>
+            {{ if eq .Role "Admin" }}
             <a href="/admin">Admin</a>
+            {{ end }}
         </nav>
         <div class="nav-right">
             <a href="/login" class="btn btn-outline btn-sm active">Login</a>
@@ -35,7 +37,7 @@
 
         <div class="form-card">
             <form method="POST" action="/login">
-                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
+                <input type="hidden" name="csrf_token" value="">
 
                 <div class="form-group">
                     <label for="username">Username</label>
