@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Databases | Database Management Platform</title>
+</head>
+<body>
+    <header class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/databases" class="active">Databases</a>
+        </nav>
+        <div class="nav-right">
+            <form method="POST" action="/logout">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <h1>Databases</h1>
+            {{ if eq .Role "..." }}
+            <a class="btn btn-outline" href="/admin/connections">Manage connections</a>
+            {{ end }}
+        </div>
+
+        {{ with .Error }}
+        <div class="alert alert-error">{{ . }}</div>
+        {{ end }}
+        {{ with .Success }}
+        <div class="alert alert-success">{{ . }}</div>
+        {{ end }}
+
+        {{ if .Databases }}
+
+        <h2>Database List</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Database</th>
+                        <th>Access</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range .Databases }}
+                    <tr>
+                        <td class="mono">{{ .Name }}</td>
+                        <td>
+                            {{ if eq .AccessLevel "edit" }}
+                            <span class="badge badge-edit">View + Edit</span>
+                            {{ else }}
+                            <span class="badge badge-view">View Only</span>
+                            {{ end }}
+                        </td>
+                        <td class="text-right">
+                            <a class="btn btn-outline btn-sm" href="/databases/{{ .ID }}">Open</a>
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+
+        {{ else }}
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Database</th>
+                        <th>Your access</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="4" class="empty center">
+                            You don't have access to any database yet. Ask a Platform Admin to grant your group access.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        {{ end }}
+    </main>
+
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+</body>
+</html>

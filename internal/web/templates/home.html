@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Database Management Platform</title>
+</head>
+<body>
+    <header class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav class="nav-links">
+            <a href="/" class="active">Home</a>
+            <a href="/databases">Databases</a>
+        </nav>
+        <div class="nav-right">
+            <form method="POST" action="/logout">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+        </div>
+    </header>
+ 
+    <main>
+        <h1>Welcome back, <strong>{{ .Name }}</strong>!</h1>
+        <h2>Logged in as <strong>{{ .Role }}</strong>.</h2>
+        <p></p>
+    </main>
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+</body>
+</html>
