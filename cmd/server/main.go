@@ -14,7 +14,31 @@ import (
 
 var platformDB *sql.DB
 
+func loadEnv(filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+			if os.Getenv(key) == "" {
+				_ = os.Setenv(key, val)
+			}
+		}
+	}
+}
+
 func main() {
+	loadEnv(".env")
+
 	staticDir := "/app/static"
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		staticDir = "internal/web/static"
@@ -40,8 +64,13 @@ func main() {
 	http.HandleFunc("/databases", databases)
 	http.HandleFunc("/databases/", databases)
 
-	log.Println("Listening at http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
+	addr := os.Getenv("ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+
+	log.Printf("Listening at http://localhost%s\n", addr)
+	err := http.ListenAndServe(addr, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
