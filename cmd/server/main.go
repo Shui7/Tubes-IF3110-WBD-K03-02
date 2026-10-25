@@ -165,7 +165,7 @@ func adminPage(w http.ResponseWriter, r *http.Request) {
 func databases(w http.ResponseWriter, r *http.Request) {
 	subPath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/databases"), "/")
 	if subPath == "" {
-		renderDatabases(w)
+		renderDatabases(w, r)
 		return
 	}
 	parts := strings.Split(subPath, "/")
@@ -185,8 +185,8 @@ func databases(w http.ResponseWriter, r *http.Request) {
 	renderDatabaseDetail(id, w, r)
 }
 
-func renderDatabases(w http.ResponseWriter) {
-	data := web.DatabasesData{BaseData: currentUser()}
+func renderDatabases(w http.ResponseWriter, r * http.Request) {
+	data := web.DatabasesData{BaseData: currentUser(r)}
 	if platformDB == nil {
 		data.Error = "Platform database is unavailable."
 	} else if connections, err := admin.GetConnections(platformDB); err != nil {
@@ -266,7 +266,7 @@ func renderDatabaseDetail(id int, w http.ResponseWriter, r *http.Request) {
 		table = details[0].Name
 	}
 	data := web.DatabaseDetailData{
-		BaseData: currentUser(), Database: web.DatabaseItem{ID: id, Name: connection.name, AccessLevel: "edit"},
+		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: connection.name, AccessLevel: "edit"},
 		SelectedTable: table, ActiveTab: r.URL.Query().Get("tab"),
 	}
 	var selected bool
@@ -302,7 +302,7 @@ func renderDatabaseDetail(id int, w http.ResponseWriter, r *http.Request) {
 	web.RenderTemplate(w, "databasedetail.html", data)
 }
 
-func renderDatabaseError(w http.ResponseWriter, r *http.Request  id int, name, tab string, err error) {
+func renderDatabaseError(w http.ResponseWriter, r *http.Request, id int, name, tab string, err error) {
 	web.RenderTemplate(w, "databasedetail.html", web.DatabaseDetailData{
 		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: name, AccessLevel: "view"},
 		Error: err.Error(), ActiveTab: tab,
@@ -320,7 +320,7 @@ func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
 		version, versionErr := manager.NextMigrationVersion(r.Context())
 		err = versionErr
 		if err == nil {
-			err = manager.ExecuteMigration(r.Context(), version, r.FormValue("sql"), currentUser().Name)
+			err = manager.ExecuteMigration(r.Context(), version, r.FormValue("sql"), currentUser(r).Name)
 		}
 	}
 	if err != nil {
