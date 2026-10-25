@@ -19,6 +19,7 @@
         <div class="nav-right">
             <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
         </div>
@@ -78,6 +79,7 @@
                             </td>
                             <td class="text-right">
                                 <form method="POST" action="/admin/connections/delete" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                                     <input type="hidden" name="id" value="{{ .ID }}">
                                     <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                 </form>
@@ -157,6 +159,7 @@
                             <td><span class="badge">{{ .MemberCount }} members</span></td>
                             <td class="text-right">
                                 <form method="POST" action="/admin/groups/delete" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                                     <input type="hidden" name="id" value="{{ .ID }}">
                                     <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                 </form>
@@ -217,6 +220,7 @@
                             </td>
                             <td class="text-right">
                                 <form method="POST" action="/admin/permissions/delete" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                                     <input type="hidden" name="id" value="{{ .ID }}">
                                     <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                 </form>
@@ -314,6 +318,7 @@
                             </td>
                             <td class="text-right">
                                 <form method="POST" action="/admin/users/delete" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                                     <input type="hidden" name="id" value="{{ .ID }}">
                                     <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                                 </form>

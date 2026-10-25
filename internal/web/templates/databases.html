@@ -19,6 +19,7 @@
         <div class="nav-right">
             <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
         </div>

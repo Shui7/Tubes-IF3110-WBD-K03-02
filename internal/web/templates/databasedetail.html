@@ -19,6 +19,7 @@
         <div class="nav-right">
             <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
         </div>
@@ -246,7 +247,7 @@
             <div class="form-card mt-1">
                 <h3>Create Migration</h3>
                 <form method="POST" action="/databases/{{ .Database.ID }}/migrations">
-                    <input type="hidden" name="csrf_token" value="">
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div class="form-group">
                         <label for="migration_name">Migration Name</label>
