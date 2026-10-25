@@ -117,6 +117,7 @@ type DatabaseDetailData struct {
 	DataRows      [][]string
 	Migrations    []MigrationHistoryItem
 	ActiveTab     string
+	Error         string
 }
 
 //go:embed templates/*.html
