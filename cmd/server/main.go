@@ -7,13 +7,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/admin"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/auth"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
 
 var platformDB *sql.DB
+var authHandler *auth.AuthHandler
+var authMiddleware *auth.AuthMiddleware
 
 func loadEnv(filename string) {
 	data, err := os.ReadFile(filename)
@@ -53,41 +57,47 @@ func main() {
 			log.Printf("Database initialization failed: %v", err)
 		} else {
 			platformDB = db
-			defer platformDB.Close()
 			log.Println("Database initialized successfully")
 		}
+	} else {
+		log.Println("DATABASE_URL is empty")
+		return
 	}
 
+	sessionStore := auth.NewSessionStore(platformDB, 1*time.Hour, 24*time.Hour, 5*time.Minute)
+	authHandler = auth.NewAuthHandler(platformDB, sessionStore)
+	authMiddleware = auth.NewAuthMiddleware(sessionStore)
+
 	http.HandleFunc("/", home)
-	http.HandleFunc("/login", login)
+	http.HandleFunc("/login", authHandler.HandleLogin)
 	http.HandleFunc("/logout", logout)
-	http.HandleFunc("/admin", adminPage)
-	http.HandleFunc("/admin/connections/add", func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin", authMiddleware.RequireAuth(http.HandlerFunc(adminPage)))
+	http.Handle("/admin/connections/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddConnection(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/connections/delete", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/connections/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteConnection(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/groups/add", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/groups/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddGroup(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/groups/delete", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/groups/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteGroup(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/permissions/grant", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/permissions/grant", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGrantPermission(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/permissions/delete", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/permissions/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeletePermission(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/users/add", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/users/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddUser(platformDB, w, r)
-	})
-	http.HandleFunc("/admin/users/delete", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	http.Handle("/admin/users/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteUser(platformDB, w, r)
-	})
-	http.HandleFunc("/databases", databases)
-	http.HandleFunc("/databases/", databases)
+	})))
+	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
+	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -101,10 +111,16 @@ func main() {
 	}
 }
 
-func currentUser() web.BaseData {
+func currentUser(r *http.Request) web.BaseData {
+	session, ok := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if !ok || session == nil {
+		return web.BaseData{Name: "", Role: "Guest"}
+	}
+
 	return web.BaseData{
-		Name: "John User",
-		Role: "Admin",
+		Name:      session.Name,
+		Role:      session.Role,
+		CSRFToken: session.CSRFToken,
 	}
 }
 
@@ -113,21 +129,11 @@ func home(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	web.RenderTemplate(w, "home.html", currentUser())
+	web.RenderTemplate(w, "home.html", currentUser(r))
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
-	web.RenderTemplate(w, "login.html", web.LoginData{
-		BaseData: web.BaseData{
-			Name: "",
-			Role: "Guest",
-		},
-	})
+	authHandler.HandleLogin(w, r)
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +159,7 @@ func adminPage(w http.ResponseWriter, r *http.Request) {
 	errQuery := r.URL.Query().Get("error")
 	successQuery := r.URL.Query().Get("success")
 
-	adminUser := currentUser()
+	adminUser := currentUser(r)
 	adminUser.Role = "Admin"
 	if errQuery != "" {
 		adminUser.Error = errQuery
@@ -199,7 +205,7 @@ func databases(w http.ResponseWriter, r *http.Request) {
 
 	if subPath == "" {
 		web.RenderTemplate(w, "databases.html", web.DatabasesData{
-			BaseData: currentUser(),
+			BaseData: currentUser(r),
 			Databases: []web.DatabaseItem{
 				{ID: 1, Name: "sales_db", AccessLevel: "edit"},
 				{ID: 2, Name: "reports_db", AccessLevel: "view"},
@@ -229,7 +235,7 @@ func databases(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.RenderTemplate(w, "databasedetail.html", web.DatabaseDetailData{
-		BaseData: currentUser(),
+		BaseData: currentUser(r),
 		Database: web.DatabaseItem{
 			ID:          id,
 			Name:        dbName,
