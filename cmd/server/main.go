@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/admin"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
@@ -60,7 +61,31 @@ func main() {
 	http.HandleFunc("/", home)
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/logout", logout)
-	http.HandleFunc("/admin", admin)
+	http.HandleFunc("/admin", adminPage)
+	http.HandleFunc("/admin/connections/add", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddConnection(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/connections/delete", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteConnection(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/groups/add", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddGroup(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/groups/delete", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteGroup(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/permissions/grant", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGrantPermission(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/permissions/delete", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeletePermission(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/users/add", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddUser(platformDB, w, r)
+	})
+	http.HandleFunc("/admin/users/delete", func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteUser(platformDB, w, r)
+	})
 	http.HandleFunc("/databases", databases)
 	http.HandleFunc("/databases/", databases)
 
@@ -123,39 +148,49 @@ func logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-func admin(w http.ResponseWriter, r *http.Request) {
+func adminPage(w http.ResponseWriter, r *http.Request) {
 	tab := r.URL.Query().Get("tab")
+	errQuery := r.URL.Query().Get("error")
+	successQuery := r.URL.Query().Get("success")
 
 	adminUser := currentUser()
 	adminUser.Role = "Admin"
+	if errQuery != "" {
+		adminUser.Error = errQuery
+	}
+	if successQuery != "" {
+		adminUser.Success = successQuery
+	}
 
-	web.RenderTemplate(w, "admin.html", web.AdminData{
+	data := web.AdminData{
 		BaseData:  adminUser,
 		ActiveTab: tab,
-		Connections: []web.DBConnectionItem{
-			{ID: 1, Database: "sales_db", Host: "db", Port: 5432, User: "postgres", Status: "Connected"},
-			{ID: 2, Database: "reports_db", Host: "db", Port: 5432, User: "postgres", Status: "Connected"},
-			{ID: 3, Database: "archive_db", Host: "archive.internal", Port: 5432, User: "db_admin", Status: "Failed"},
-		},
-		Groups: []web.GroupItem{
-			{ID: 1, Name: "engineering", MemberCount: 3},
-			{ID: 2, Name: "data-analysts", MemberCount: 5},
-			{ID: 3, Name: "auditors", MemberCount: 2},
-		},
-		Users: []web.UserItem{
-			{ID: 1, Username: "admin", Name: "System Administrator", Role: "Admin", Groups: []string{"engineering"}},
-			{ID: 2, Username: "johndoe", Name: "John Doe", Role: "User", Groups: []string{"engineering", "data-analysts"}},
-			{ID: 3, Username: "janesmith", Name: "Jane Smith", Role: "User", Groups: []string{"data-analysts"}},
-			{ID: 4, Username: "alicedev", Name: "Alice Bob", Role: "User", Groups: []string{"auditors"}},
-		},
-		Permissions: []web.GroupPermissionItem{
-			{ID: 1, GroupID: 1, GroupName: "engineering", DatabaseID: 1, DatabaseName: "sales_db", AccessLevel: "edit"},
-			{ID: 2, GroupID: 1, GroupName: "engineering", DatabaseID: 2, DatabaseName: "reports_db", AccessLevel: "edit"},
-			{ID: 3, GroupID: 2, GroupName: "data-analysts", DatabaseID: 1, DatabaseName: "sales_db", AccessLevel: "view"},
-			{ID: 4, GroupID: 2, GroupName: "data-analysts", DatabaseID: 2, DatabaseName: "reports_db", AccessLevel: "view"},
-			{ID: 5, GroupID: 3, GroupName: "auditors", DatabaseID: 1, DatabaseName: "sales_db", AccessLevel: "view"},
-		},
-	})
+	}
+
+	if platformDB != nil {
+		if conns, err := admin.GetConnections(platformDB); err == nil {
+			data.Connections = conns
+		} else {
+			log.Printf("GetConnections error: %v", err)
+		}
+		if groups, err := admin.GetGroups(platformDB); err == nil {
+			data.Groups = groups
+		} else {
+			log.Printf("GetGroups error: %v", err)
+		}
+		if users, err := admin.GetUsers(platformDB); err == nil {
+			data.Users = users
+		} else {
+			log.Printf("GetUsers error: %v", err)
+		}
+		if perms, err := admin.GetPermissions(platformDB); err == nil {
+			data.Permissions = perms
+		} else {
+			log.Printf("GetPermissions error: %v", err)
+		}
+	}
+
+	web.RenderTemplate(w, "admin.html", data)
 }
 
 func databases(w http.ResponseWriter, r *http.Request) {
