@@ -64,33 +64,37 @@ func main() {
 	sessionStore := auth.NewSessionStore(platformDB, 1*time.Hour, 24*time.Hour, 5*time.Minute)
 	authHandler = auth.NewAuthHandler(platformDB, sessionStore)
 	authMiddleware = auth.NewAuthMiddleware(sessionStore)
+	adminOnly := func(next http.Handler) http.Handler {
+		return authMiddleware.RequireAuth(authMiddleware.RequireRole("Admin", next))
+	}
 
 	http.Handle("/", authMiddleware.RequireAuth(http.HandlerFunc(home)))
 	http.HandleFunc("/login", authHandler.HandleLogin)
 	http.HandleFunc("/logout", logout)
-	http.Handle("/admin", authMiddleware.RequireAuth(http.HandlerFunc(adminPage)))
-	http.Handle("/admin/connections/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/unauthorized", unauthorizedPage)
+	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
+	http.Handle("/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddConnection(platformDB, w, r)
 	})))
-	http.Handle("/admin/connections/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/connections/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteConnection(platformDB, w, r)
 	})))
-	http.Handle("/admin/groups/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/groups/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddGroup(platformDB, w, r)
 	})))
-	http.Handle("/admin/groups/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/groups/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteGroup(platformDB, w, r)
 	})))
-	http.Handle("/admin/permissions/grant", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/permissions/grant", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGrantPermission(platformDB, w, r)
 	})))
-	http.Handle("/admin/permissions/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/permissions/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeletePermission(platformDB, w, r)
 	})))
-	http.Handle("/admin/users/add", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/users/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddUser(platformDB, w, r)
 	})))
-	http.Handle("/admin/users/delete", authMiddleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/admin/users/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
@@ -104,6 +108,15 @@ func main() {
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func unauthorizedPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	web.RenderTemplate(w, "unauthorized.html", web.BaseData{
+		Name: "Guest",
+		Role: "Guest",
+	})
 }
 
 func currentUser(r *http.Request) web.BaseData {

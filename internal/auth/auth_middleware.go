@@ -56,3 +56,20 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+func (m *AuthMiddleware) RequireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := r.Context().Value(SessionContextKey).(*Session)
+		if !ok || session == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
+		if session.Role != role {
+			http.Redirect(w, r, "/unauthorized", http.StatusSeeOther)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
