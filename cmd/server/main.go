@@ -1,14 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
+
+var platformDB *sql.DB
 
 func main() {
 	staticDir := "/app/static"
@@ -17,8 +21,21 @@ func main() {
 	}
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL != "" {
+		db, err := dbplatform.InitPlatformDB(dbURL)
+		if err != nil {
+			log.Printf("Database initialization failed: %v", err)
+		} else {
+			platformDB = db
+			defer platformDB.Close()
+			log.Println("Database initialized successfully")
+		}
+	}
+
 	http.HandleFunc("/", home)
 	http.HandleFunc("/login", login)
+	http.HandleFunc("/logout", logout)
 	http.HandleFunc("/admin", admin)
 	http.HandleFunc("/databases", databases)
 	http.HandleFunc("/databases/", databases)
@@ -57,6 +74,24 @@ func login(w http.ResponseWriter, r *http.Request) {
 			Role: "Guest",
 		},
 	})
+}
+
+func logout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session_id")
+	if err == nil && cookie.Value != "" && platformDB != nil {
+		_, _ = platformDB.Exec("UPDATE sessions SET is_revoked = TRUE WHERE id = $1", cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func admin(w http.ResponseWriter, r *http.Request) {

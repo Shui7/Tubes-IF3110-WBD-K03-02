@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/style.css">
     <title>Login | Database Management Platform</title>
 </head>
+
 <body>
     <header class="navbar">
         <a class="brand" href="/">DBManagementPlatform</a>
@@ -37,12 +39,14 @@
 
                 <div class="form-group">
                     <label for="username">Username</label>
-                    <input type="text" id="username" name="username" value="{{ .Username }}" required autofocus autocomplete="username" placeholder="Enter username">
+                    <input type="text" id="username" name="username" value="{{ .Username }}" required autofocus
+                        autocomplete="username" placeholder="Enter username">
                 </div>
 
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+                    <input type="password" id="password" name="password" required autocomplete="current-password"
+                        placeholder="••••••••">
                 </div>
 
                 <div class="form-actions">
@@ -62,4 +66,5 @@
         </ul>
     </footer>
 </body>
+
 </html>

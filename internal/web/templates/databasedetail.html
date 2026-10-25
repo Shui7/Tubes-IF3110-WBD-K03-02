@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/style.css">
     <title>{{ .Database.Name }} | Database Management Platform</title>
 </head>
+
 <body>
     <header class="navbar">
         <a class="brand" href="/">DBManagementPlatform</a>
@@ -15,7 +17,7 @@
             <a href="/admin">Admin</a>
         </nav>
         <div class="nav-right">
-            <span class="muted mono">{{ .Name }}</span>
+            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
@@ -54,7 +56,8 @@
         <section id="tab-schema" class="tab-content">
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
                 {{ range .Tables }}
-                <a href="?table={{ .Name }}#schema" class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
+                <a href="?table={{ .Name }}#schema"
+                    class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
                     {{ .Name }}
                 </a>
                 {{ end }}
@@ -76,19 +79,20 @@
                     </thead>
                     <tbody>
                         {{ if .Columns }}
-                            {{ range .Columns }}
-                            <tr>
-                                <td class="mono font-bold">{{ .Name }}</td>
-                                <td class="mono">{{ .Type }}</td>
-                                <td>{{ if .Nullable }}YES{{ else }}NO{{ end }}</td>
-                                <td class="mono">{{ if .Default }}{{ .Default }}{{ else }}<span class="null">-</span>{{ end }}</td>
-                                <td>{{ if .IsPK }}<span class="badge badge-edit">PK</span>{{ else }}-{{ end }}</td>
-                            </tr>
-                            {{ end }}
+                        {{ range .Columns }}
+                        <tr>
+                            <td class="mono font-bold">{{ .Name }}</td>
+                            <td class="mono">{{ .Type }}</td>
+                            <td>{{ if .Nullable }}YES{{ else }}NO{{ end }}</td>
+                            <td class="mono">{{ if .Default }}{{ .Default }}{{ else }}<span class="null">-</span>{{ end
+                                }}</td>
+                            <td>{{ if .IsPK }}<span class="badge badge-edit">PK</span>{{ else }}-{{ end }}</td>
+                        </tr>
+                        {{ end }}
                         {{ else }}
-                            <tr>
-                                <td colspan="5" class="empty center">No column information available.</td>
-                            </tr>
+                        <tr>
+                            <td colspan="5" class="empty center">No column information available.</td>
+                        </tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -106,17 +110,17 @@
                     </thead>
                     <tbody>
                         {{ if .Constraints }}
-                            {{ range .Constraints }}
-                            <tr>
-                                <td class="mono">{{ .Name }}</td>
-                                <td><span class="badge">{{ .Type }}</span></td>
-                                <td class="mono">{{ .Definition }}</td>
-                            </tr>
-                            {{ end }}
+                        {{ range .Constraints }}
+                        <tr>
+                            <td class="mono">{{ .Name }}</td>
+                            <td><span class="badge">{{ .Type }}</span></td>
+                            <td class="mono">{{ .Definition }}</td>
+                        </tr>
+                        {{ end }}
                         {{ else }}
-                            <tr>
-                                <td colspan="3" class="empty center">No constraints found.</td>
-                            </tr>
+                        <tr>
+                            <td colspan="3" class="empty center">No constraints found.</td>
+                        </tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -135,18 +139,18 @@
                     </thead>
                     <tbody>
                         {{ if .Indexes }}
-                            {{ range .Indexes }}
-                            <tr>
-                                <td class="mono">{{ .Name }}</td>
-                                <td class="mono">{{ .Columns }}</td>
-                                <td>{{ .Type }}</td>
-                                <td>{{ if .Unique }}YES{{ else }}NO{{ end }}</td>
-                            </tr>
-                            {{ end }}
+                        {{ range .Indexes }}
+                        <tr>
+                            <td class="mono">{{ .Name }}</td>
+                            <td class="mono">{{ .Columns }}</td>
+                            <td>{{ .Type }}</td>
+                            <td>{{ if .Unique }}YES{{ else }}NO{{ end }}</td>
+                        </tr>
+                        {{ end }}
                         {{ else }}
-                            <tr>
-                                <td colspan="4" class="empty center">No indexes found.</td>
-                            </tr>
+                        <tr>
+                            <td colspan="4" class="empty center">No indexes found.</td>
+                        </tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -156,7 +160,8 @@
         <section id="tab-data" class="tab-content" style="display: none;">
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
                 {{ range .Tables }}
-                <a href="?table={{ .Name }}#data" class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
+                <a href="?table={{ .Name }}#data"
+                    class="btn {{ if eq $.SelectedTable .Name }}btn-primary{{ else }}btn-outline{{ end }} btn-sm mono">
                     {{ .Name }}
                 </a>
                 {{ end }}
@@ -175,17 +180,17 @@
                     </thead>
                     <tbody>
                         {{ if .DataRows }}
-                            {{ range .DataRows }}
-                            <tr>
-                                {{ range . }}
-                                <td>{{ if eq . "" }}<span class="null">NULL</span>{{ else }}{{ . }}{{ end }}</td>
-                                {{ end }}
-                            </tr>
+                        {{ range .DataRows }}
+                        <tr>
+                            {{ range . }}
+                            <td>{{ if eq . "" }}<span class="null">NULL</span>{{ else }}{{ . }}{{ end }}</td>
                             {{ end }}
+                        </tr>
+                        {{ end }}
                         {{ else }}
-                            <tr>
-                                <td colspan="{{ len .DataHeaders }}" class="empty center">No rows found in this table.</td>
-                            </tr>
+                        <tr>
+                            <td colspan="{{ len .DataHeaders }}" class="empty center">No rows found in this table.</td>
+                        </tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -213,25 +218,25 @@
                     </thead>
                     <tbody>
                         {{ if .Migrations }}
-                            {{ range .Migrations }}
-                            <tr>
-                                <td class="mono font-bold">{{ .Version }}</td>
-                                <td>{{ .Name }}</td>
-                                <td>{{ .ExecutedBy }}</td>
-                                <td class="mono">{{ .ExecutedAt }}</td>
-                                <td>
-                                    {{ if eq .Status "success" }}
-                                    <span class="badge badge-success">Success</span>
-                                    {{ else }}
-                                    <span class="badge badge-failed">Failed</span>
-                                    {{ end }}
-                                </td>
-                            </tr>
-                            {{ end }}
+                        {{ range .Migrations }}
+                        <tr>
+                            <td class="mono font-bold">{{ .Version }}</td>
+                            <td>{{ .Name }}</td>
+                            <td>{{ .ExecutedBy }}</td>
+                            <td class="mono">{{ .ExecutedAt }}</td>
+                            <td>
+                                {{ if eq .Status "success" }}
+                                <span class="badge badge-success">Success</span>
+                                {{ else }}
+                                <span class="badge badge-failed">Failed</span>
+                                {{ end }}
+                            </td>
+                        </tr>
+                        {{ end }}
                         {{ else }}
-                            <tr>
-                                <td colspan="5" class="empty center">No migration history recorded.</td>
-                            </tr>
+                        <tr>
+                            <td colspan="5" class="empty center">No migration history recorded.</td>
+                        </tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -245,12 +250,14 @@
 
                     <div class="form-group">
                         <label for="migration_name">Migration Name</label>
-                        <input type="text" id="migration_name" name="name" required placeholder="e.g. 002_add_discount_column">
+                        <input type="text" id="migration_name" name="name" required
+                            placeholder="e.g. 002_add_discount_column">
                     </div>
 
                     <div class="form-group">
                         <label for="migration_sql">Migration SQL</label>
-                        <textarea id="migration_sql" class="sql-editor" name="sql" rows="8" placeholder="ALTER TABLE orders ADD COLUMN discount NUMERIC(10, 2) DEFAULT 0.00;"></textarea>
+                        <textarea id="migration_sql" class="sql-editor" name="sql" rows="8"
+                            placeholder="ALTER TABLE orders ADD COLUMN discount NUMERIC(10, 2) DEFAULT 0.00;"></textarea>
                     </div>
 
                     <div class="form-actions">
@@ -320,4 +327,5 @@
         })();
     </script>
 </body>
+
 </html>

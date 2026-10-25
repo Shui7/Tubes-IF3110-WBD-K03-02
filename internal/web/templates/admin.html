@@ -17,7 +17,7 @@
             <a href="/admin" class="active">Admin</a>
         </nav>
         <div class="nav-right">
-            <span class="muted mono">{{ .Name }}</span>
+            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>

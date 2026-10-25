@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/style.css">
     <title>Databases | Database Management Platform</title>
 </head>
+
 <body>
     <header class="navbar">
         <a class="brand" href="/">DBManagementPlatform</a>
@@ -15,7 +17,7 @@
             <a href="/admin">Admin</a>
         </nav>
         <div class="nav-right">
-            <a href="/login" class="btn btn-outline btn-sm">Login</a>
+            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
             <form method="POST" action="/logout">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
@@ -104,4 +106,5 @@
         </ul>
     </footer>
 </body>
+
 </html>
