@@ -14,6 +14,7 @@ import (
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/admin"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/auth"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/authz"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
@@ -187,7 +188,22 @@ func databases(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	// Authorization: check user's access level for this specific database.
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, id)
+	if err != nil || level == authz.AccessNone {
+		http.Error(w, "Forbidden: you do not have access to this database", http.StatusForbidden)
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "migrations" {
+		// Only View+Edit users may execute migrations (POST). View-only users can still
+		// reach this route via GET (which just redirects back to the detail page).
+		if r.Method == http.MethodPost && level != authz.AccessEdit {
+			http.Error(w, "Forbidden: edit access required to execute migrations", http.StatusForbidden)
+			return
+		}
 		handleMigration(id, w, r)
 		return
 	}
@@ -195,18 +211,25 @@ func databases(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	renderDatabaseDetail(id, w, r)
+	renderDatabaseDetail(id, string(level), w, r)
 }
 
 func renderDatabases(w http.ResponseWriter, r *http.Request) {
 	data := web.DatabasesData{BaseData: currentUser(r)}
 	if platformDB == nil {
 		data.Error = "Platform database is unavailable."
-	} else if connections, err := admin.GetConnections(platformDB); err != nil {
+		web.RenderTemplate(w, "databases.html", data)
+		return
+	}
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	dbList, err := authz.GetUserDatabaseList(platformDB, sess.UserID)
+	if err != nil {
 		data.Error = fmt.Sprintf("Unable to load databases: %v", err)
 	} else {
-		for _, connection := range connections {
-			data.Databases = append(data.Databases, web.DatabaseItem{ID: connection.ID, Name: connection.Database, AccessLevel: "edit"})
+		for _, d := range dbList {
+			data.Databases = append(data.Databases, web.DatabaseItem{
+				ID: d.ConnectionID, Name: d.Name, AccessLevel: string(d.AccessLevel),
+			})
 		}
 	}
 	web.RenderTemplate(w, "databases.html", data)
@@ -256,7 +279,7 @@ func quoteConnectionValue(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "\\'") + "'"
 }
 
-func renderDatabaseDetail(id int, w http.ResponseWriter, r *http.Request) {
+func renderDatabaseDetail(id int, accessLevel string, w http.ResponseWriter, r *http.Request) {
 	manager, connection, err := openManagedDatabase(r.Context(), id)
 	if err != nil {
 		renderDatabaseError(w, r, id, fmt.Sprintf("Database %d", id), r.URL.Query().Get("tab"), err)
@@ -279,7 +302,7 @@ func renderDatabaseDetail(id int, w http.ResponseWriter, r *http.Request) {
 		table = details[0].Name
 	}
 	data := web.DatabaseDetailData{
-		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: connection.name, AccessLevel: "edit"},
+		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: connection.name, AccessLevel: accessLevel},
 		SelectedTable: table, ActiveTab: r.URL.Query().Get("tab"),
 	}
 	var selected bool
