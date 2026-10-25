@@ -211,6 +211,22 @@ func (m *Manager) PreviewRows(ctx context.Context, schema, table string, limit i
 	return m.PreviewRowsPage(ctx, schema, table, limit, 0)
 }
 
+func (m *Manager) CountRows(ctx context.Context, schema, table string) (int64, error) {
+	if err := validateIdentifier(schema); err != nil {
+		return 0, err
+	}
+	if err := validateIdentifier(table); err != nil {
+		return 0, err
+	}
+
+	var count int64
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s.%s", quoteIdentifier(schema), quoteIdentifier(table))
+	if err := m.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count rows: %w", err)
+	}
+	return count, nil
+}
+
 func (m *Manager) PreviewRowsPage(ctx context.Context, schema, table string, limit, offset int) ([]Row, error) {
 	if err := validateIdentifier(schema); err != nil {
 		return nil, err

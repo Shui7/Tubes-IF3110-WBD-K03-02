@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/admin"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/auth"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
@@ -24,34 +28,27 @@ func loadEnv(filename string) {
 	if err != nil {
 		return
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			val := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-			if os.Getenv(key) == "" {
-				_ = os.Setenv(key, val)
-			}
+		if len(parts) == 2 && os.Getenv(strings.TrimSpace(parts[0])) == "" {
+			_ = os.Setenv(strings.TrimSpace(parts[0]), strings.Trim(strings.TrimSpace(parts[1]), `"'`))
 		}
 	}
 }
 
 func main() {
 	loadEnv(".env")
-
 	staticDir := "/app/static"
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		staticDir = "internal/web/static"
 	}
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(staticDir))))
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL != "" {
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		db, err := dbplatform.InitPlatformDB(dbURL)
 		if err != nil {
 			log.Printf("Database initialization failed: %v", err)
@@ -103,10 +100,8 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-
 	log.Printf("Listening at http://localhost%s\n", addr)
-	err := http.ListenAndServe(addr, nil)
-	if err != nil {
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -137,145 +132,272 @@ func login(w http.ResponseWriter, r *http.Request) {
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session_id")
-	if err == nil && cookie.Value != "" && platformDB != nil {
+	if cookie, err := r.Cookie("session_id"); err == nil && cookie.Value != "" && platformDB != nil {
 		_, _ = platformDB.Exec("UPDATE sessions SET is_revoked = TRUE WHERE id = $1", cookie.Value)
 	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
-
+	http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func adminPage(w http.ResponseWriter, r *http.Request) {
-	tab := r.URL.Query().Get("tab")
-	errQuery := r.URL.Query().Get("error")
-	successQuery := r.URL.Query().Get("success")
-
-	adminUser := currentUser(r)
-	adminUser.Role = "Admin"
-	if errQuery != "" {
-		adminUser.Error = errQuery
-	}
-	if successQuery != "" {
-		adminUser.Success = successQuery
-	}
-
-	data := web.AdminData{
-		BaseData:  adminUser,
-		ActiveTab: tab,
-	}
-
+	user := currentUser(r)
+	user.Error = r.URL.Query().Get("error")
+	user.Success = r.URL.Query().Get("success")
+	data := web.AdminData{BaseData: user, ActiveTab: r.URL.Query().Get("tab")}
 	if platformDB != nil {
-		if conns, err := admin.GetConnections(platformDB); err == nil {
-			data.Connections = conns
-		} else {
+		var err error
+		if data.Connections, err = admin.GetConnections(platformDB); err != nil {
 			log.Printf("GetConnections error: %v", err)
 		}
-		if groups, err := admin.GetGroups(platformDB); err == nil {
-			data.Groups = groups
-		} else {
+		if data.Groups, err = admin.GetGroups(platformDB); err != nil {
 			log.Printf("GetGroups error: %v", err)
 		}
-		if users, err := admin.GetUsers(platformDB); err == nil {
-			data.Users = users
-		} else {
+		if data.Users, err = admin.GetUsers(platformDB); err != nil {
 			log.Printf("GetUsers error: %v", err)
 		}
-		if perms, err := admin.GetPermissions(platformDB); err == nil {
-			data.Permissions = perms
-		} else {
+		if data.Permissions, err = admin.GetPermissions(platformDB); err != nil {
 			log.Printf("GetPermissions error: %v", err)
 		}
 	}
-
 	web.RenderTemplate(w, "admin.html", data)
 }
 
 func databases(w http.ResponseWriter, r *http.Request) {
-	subPath := strings.TrimPrefix(r.URL.Path, "/databases")
-	subPath = strings.Trim(subPath, "/")
-
+	subPath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/databases"), "/")
 	if subPath == "" {
-		web.RenderTemplate(w, "databases.html", web.DatabasesData{
-			BaseData: currentUser(r),
-			Databases: []web.DatabaseItem{
-				{ID: 1, Name: "sales_db", AccessLevel: "edit"},
-				{ID: 2, Name: "reports_db", AccessLevel: "view"},
-			},
-		})
+		renderDatabases(w)
 		return
 	}
-
 	parts := strings.Split(subPath, "/")
 	id, err := strconv.Atoi(parts[0])
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "migrations" {
+		handleMigration(id, w, r)
+		return
+	}
+	if len(parts) != 1 || r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	renderDatabaseDetail(id, w, r)
+}
 
-	tab := r.URL.Query().Get("tab")
+func renderDatabases(w http.ResponseWriter) {
+	data := web.DatabasesData{BaseData: currentUser()}
+	if platformDB == nil {
+		data.Error = "Platform database is unavailable."
+	} else if connections, err := admin.GetConnections(platformDB); err != nil {
+		data.Error = fmt.Sprintf("Unable to load databases: %v", err)
+	} else {
+		for _, connection := range connections {
+			data.Databases = append(data.Databases, web.DatabaseItem{ID: connection.ID, Name: connection.Database, AccessLevel: "edit"})
+		}
+	}
+	web.RenderTemplate(w, "databases.html", data)
+}
+
+type managedConnection struct {
+	name, host, database, username, password string
+	port                                     int
+}
+
+func getManagedConnection(id int) (managedConnection, error) {
+	if platformDB == nil {
+		return managedConnection{}, fmt.Errorf("platform database is unavailable")
+	}
+	var connection managedConnection
+	err := platformDB.QueryRow(`
+		SELECT COALESCE(NULLIF(database_name, ''), NULLIF(name, ''), dbname, ''), host, port,
+		       COALESCE(NULLIF(database_name, ''), NULLIF(name, ''), dbname, ''), username, password
+		FROM database_connections WHERE id = $1`, id).Scan(
+		&connection.name, &connection.host, &connection.port, &connection.database,
+		&connection.username, &connection.password)
+	if err == sql.ErrNoRows {
+		return managedConnection{}, fmt.Errorf("database %d was not found", id)
+	}
+	if err != nil {
+		return managedConnection{}, fmt.Errorf("load database %d: %w", id, err)
+	}
+	return connection, nil
+}
+
+func openManagedDatabase(ctx context.Context, id int) (*dbmanager.Manager, managedConnection, error) {
+	connection, err := getManagedConnection(id)
+	if err != nil {
+		return nil, managedConnection{}, err
+	}
+	connectionString := fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
+		quoteConnectionValue(connection.host), connection.port, quoteConnectionValue(connection.database),
+		quoteConnectionValue(connection.username), quoteConnectionValue(connection.password))
+	manager, err := dbmanager.Open(ctx, connectionString)
+	if err != nil {
+		return nil, managedConnection{}, fmt.Errorf("connect to %s: %w", connection.name, err)
+	}
+	return manager, connection, nil
+}
+
+func quoteConnectionValue(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "\\'") + "'"
+}
+
+func renderDatabaseDetail(id int, w http.ResponseWriter, r *http.Request) {
+	manager, connection, err := openManagedDatabase(r.Context(), id)
+	if err != nil {
+		renderDatabaseError(w, r, id, fmt.Sprintf("Database %d", id), r.URL.Query().Get("tab"), err)
+		return
+	}
+	defer manager.Close()
+
+	const schema = "public"
+	details, err := manager.ListTableDetails(r.Context(), schema)
+	if err != nil {
+		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
+		return
+	}
+	if len(details) == 0 {
+		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), fmt.Errorf("no tables found in schema %q", schema))
+		return
+	}
 	table := r.URL.Query().Get("table")
 	if table == "" {
-		table = "orders"
+		table = details[0].Name
 	}
-
-	dbName := "sales_db"
-	accessLevel := "edit"
-	if id == 2 {
-		dbName = "reports_db"
-		accessLevel = "view"
+	data := web.DatabaseDetailData{
+		BaseData: currentUser(), Database: web.DatabaseItem{ID: id, Name: connection.name, AccessLevel: "edit"},
+		SelectedTable: table, ActiveTab: r.URL.Query().Get("tab"),
 	}
+	var selected bool
+	for _, detail := range details {
+		count, countErr := manager.CountRows(r.Context(), detail.Schema, detail.Name)
+		if countErr != nil {
+			log.Printf("Count rows for %s.%s: %v", detail.Schema, detail.Name, countErr)
+		}
+		data.Tables = append(data.Tables, web.TableSummary{Name: detail.Name, RowCount: count})
+		if detail.Name == table {
+			selected = true
+			data.Columns = convertColumns(detail.Columns)
+			data.Constraints = convertConstraints(detail.Constraints)
+			data.Indexes = convertIndexes(detail.Indexes)
+		}
+	}
+	if !selected {
+		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), fmt.Errorf("table %q was not found", table))
+		return
+	}
+	rows, err := manager.PreviewRows(r.Context(), schema, table, 100)
+	if err != nil {
+		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
+		return
+	}
+	data.DataHeaders, data.DataRows = convertRows(rows, data.Columns)
+	migrations, err := manager.ListMigrations(r.Context())
+	if err != nil {
+		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
+		return
+	}
+	data.Migrations = convertMigrations(migrations)
+	web.RenderTemplate(w, "databasedetail.html", data)
+}
 
+func renderDatabaseError(w http.ResponseWriter, r *http.Request  id int, name, tab string, err error) {
 	web.RenderTemplate(w, "databasedetail.html", web.DatabaseDetailData{
-		BaseData: currentUser(r),
-		Database: web.DatabaseItem{
-			ID:          id,
-			Name:        dbName,
-			AccessLevel: accessLevel,
-		},
-		Tables: []web.TableSummary{
-			{Name: "orders", RowCount: 1250},
-			{Name: "order_items", RowCount: 4830},
-			{Name: "products", RowCount: 320},
-			{Name: "customers", RowCount: 910},
-		},
-		SelectedTable: table,
-		Columns: []web.ColumnItem{
-			{Name: "id", Type: "integer", Nullable: false, Default: "nextval('orders_id_seq')", IsPK: true},
-			{Name: "customer_id", Type: "integer", Nullable: false, Default: "", IsPK: false},
-			{Name: "order_date", Type: "timestamp with time zone", Nullable: false, Default: "now()", IsPK: false},
-			{Name: "total_amount", Type: "numeric(10,2)", Nullable: false, Default: "0.00", IsPK: false},
-			{Name: "status", Type: "character varying(50)", Nullable: false, Default: "'pending'", IsPK: false},
-		},
-		Constraints: []web.ConstraintItem{
-			{Name: "orders_pkey", Type: "PRIMARY KEY", Definition: "PRIMARY KEY (id)"},
-			{Name: "fk_orders_customer", Type: "FOREIGN KEY", Definition: "FOREIGN KEY (customer_id) REFERENCES customers(id)"},
-			{Name: "chk_total_amount", Type: "CHECK", Definition: "CHECK (total_amount >= 0)"},
-		},
-		Indexes: []web.IndexItem{
-			{Name: "orders_pkey", Columns: "id", Type: "BTREE", Unique: true},
-			{Name: "idx_orders_customer_id", Columns: "customer_id", Type: "BTREE", Unique: false},
-			{Name: "idx_orders_date", Columns: "order_date", Type: "BTREE", Unique: false},
-		},
-		DataHeaders: []string{"id", "customer_id", "order_date", "total_amount", "status"},
-		DataRows: [][]string{
-			{"1", "101", "2026-03-01 10:14:00+00", "150.00", "completed"},
-			{"2", "104", "2026-03-02 14:22:30+00", "89.50", "completed"},
-			{"3", "108", "2026-03-03 09:05:12+00", "340.00", "processing"},
-			{"4", "112", "2026-03-04 16:45:00+00", "25.00", "pending"},
-		},
-		Migrations: []web.MigrationHistoryItem{
-			{Version: "001", Name: "001_initial_schema", ExecutedBy: "admin", ExecutedAt: "2026-01-10 09:00:00", Status: "success", SQL: "CREATE TABLE customers (...); CREATE TABLE orders (...);"},
-			{Version: "002", Name: "002_add_order_status_index", ExecutedBy: "johndoe", ExecutedAt: "2026-02-15 11:30:00", Status: "success", SQL: "CREATE INDEX idx_orders_status ON orders(status);"},
-		},
-		ActiveTab: tab,
+		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: name, AccessLevel: "view"},
+		Error: err.Error(), ActiveTab: tab,
 	})
+}
+
+func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/databases/"+strconv.Itoa(id), http.StatusSeeOther)
+		return
+	}
+	manager, _, err := openManagedDatabase(r.Context(), id)
+	if err == nil {
+		defer manager.Close()
+		version, versionErr := manager.NextMigrationVersion(r.Context())
+		err = versionErr
+		if err == nil {
+			err = manager.ExecuteMigration(r.Context(), version, r.FormValue("sql"), currentUser().Name)
+		}
+	}
+	if err != nil {
+		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+		return
+	}
+	message := "Migration executed successfully."
+	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
+		message = name + " executed successfully."
+	}
+	http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func convertColumns(columns []dbmanager.Column) []web.ColumnItem {
+	result := make([]web.ColumnItem, 0, len(columns))
+	for _, column := range columns {
+		result = append(result, web.ColumnItem{Name: column.Name, Type: column.DataType, Nullable: column.IsNullable, Default: nullStringValue(column.DefaultExpr)})
+	}
+	return result
+}
+
+func convertConstraints(constraints []dbmanager.Constraint) []web.ConstraintItem {
+	result := make([]web.ConstraintItem, 0, len(constraints))
+	for _, constraint := range constraints {
+		result = append(result, web.ConstraintItem{Name: constraint.Name, Type: constraint.Type, Definition: constraint.Definition})
+	}
+	return result
+}
+
+func convertIndexes(indexes []dbmanager.Index) []web.IndexItem {
+	result := make([]web.IndexItem, 0, len(indexes))
+	for _, index := range indexes {
+		result = append(result, web.IndexItem{Name: index.Name, Columns: index.Definition, Type: "BTREE"})
+	}
+	return result
+}
+
+func convertRows(rows []dbmanager.Row, columns []web.ColumnItem) ([]string, [][]string) {
+	headers := make([]string, 0, len(columns))
+	for _, column := range columns {
+		headers = append(headers, column.Name)
+	}
+	result := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		values := make([]string, 0, len(headers))
+		for _, header := range headers {
+			value, ok := row[header]
+			if !ok || value == nil {
+				values = append(values, "")
+			} else {
+				values = append(values, fmt.Sprint(value))
+			}
+		}
+		result = append(result, values)
+	}
+	return headers, result
+}
+
+func convertMigrations(migrations []dbmanager.Migration) []web.MigrationHistoryItem {
+	result := make([]web.MigrationHistoryItem, 0, len(migrations))
+	for _, migration := range migrations {
+		executedAt := ""
+		if migration.ExecutedAt.Valid {
+			executedAt = migration.ExecutedAt.Time.Format(time.RFC3339)
+		}
+		version := strconv.FormatInt(migration.Version, 10)
+		result = append(result, web.MigrationHistoryItem{
+			Version: version, Name: "Migration " + version, ExecutedBy: migration.ExecutedBy,
+			ExecutedAt: executedAt, Status: migration.Status, SQL: migration.SQL,
+		})
+	}
+	return result
+}
+
+func nullStringValue(value sql.NullString) string {
+	if value.Valid {
+		return value.String
+	}
+	return ""
 }
