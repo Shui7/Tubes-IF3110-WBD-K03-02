@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/password"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 )
 
 type AuthHandler struct {
@@ -23,43 +23,67 @@ func NewAuthHandler(db *sql.DB, sessionStore *SessionStore) *AuthHandler {
 }
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
 }
 
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		renderLoginAsGuest(w)
+		loginAsGuest(w)
 		return
 	}
 
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	h.HandleLoginSubmit(w, r)
+}
+
+func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Cek CSRF
+	formToken := r.FormValue("csrf_token")
+	cookie, err := r.Cookie("csrf_login_cookie")
+	if err != nil || cookie.Value == "" {
+		http.Error(w, "Forbidden: missing CSRF cookie", http.StatusForbidden)
+		return
+	}
+
+	if formToken == "" || formToken != cookie.Value {
+		http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+		return
+	}
+
+	var req LoginRequest = LoginRequest{
+		Username: r.FormValue("username"),
+		Password: r.FormValue("password"),
+	}
+	
+	// Ambil user dari database
 	var userID int
 	var passwordHash string
 	query := "SELECT id, password_hash FROM users WHERE username = $1"
-	err := h.db.QueryRow(query, req.Username).Scan(&userID, &passwordHash)
+	err = h.db.QueryRow(query, req.Username).Scan(&userID, &passwordHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			renderLoginWithError(w, "Invalid username or password")
+			renderLoginWithError(w, formToken, "Invalid username or password")
 			return
 		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
+	// Verifikasi password
 	if !password.VerifyPasswordHash(req.Password, passwordHash) {
-		renderLoginWithError(w, "Invalid username or password")
+		renderLoginWithError(w, formToken, "Invalid username or password")
 		return
 	}
 
+	// Pembuatan session
 	sess, err := h.sessionStore.CreateSession(userID)
 	if err != nil {
-		renderLoginWithError(w, err.Error())
+		renderLoginWithError(w, formToken, err.Error())
 		return
 	}
 
@@ -68,44 +92,52 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    sess.ID,
 		Path:     "/",
 		HttpOnly: true,
+		Secure: true,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  sess.ExpiresAt,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":    "Login successful",
-		"csrf_token": sess.CSRFToken,
+	http.SetCookie(w, &http.Cookie{
+		Name:     "csrf_login_cookie",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
 	})
+
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func renderLoginAsGuest(w http.ResponseWriter) {
+func loginAsGuest(w http.ResponseWriter) {
+	token, err := generateToken(32)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "csrf_login_cookie",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	web.RenderTemplate(w, "login.html", web.LoginData{
 		BaseData: web.BaseData{
-			Name:  "",
-			Role:  "Guest",
+			Name: "",
+			Role: "Guest",
 		},
+		CSRFToken: token,
 	})
 }
 
-func renderLoginWithError(w http.ResponseWriter, err string) {
+func renderLoginWithError(w http.ResponseWriter, csrf_token string, err string) {
 	web.RenderTemplate(w, "login.html", web.LoginData{
 		BaseData: web.BaseData{
 			Name:  "",
 			Role:  "Guest",
 			Error: err,
 		},
-	})
-}
-
-func redirectLoginSuccess(w http.ResponseWriter, message string) {
-	web.RenderTemplate(w, "login.html", web.LoginData{
-		BaseData: web.BaseData{
-			Name:  "",
-			Role:  "Guest",
-			Success: message,
-		},
+		CSRFToken: csrf_token,
 	})
 }
 

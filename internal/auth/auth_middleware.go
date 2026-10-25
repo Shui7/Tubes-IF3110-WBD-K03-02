@@ -32,7 +32,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 2. Validasi sesi melalui SessionStore (mengecek idle timeout, absolute expiration, & grace period)[cite: 1]
 		session, err := m.sessionStore.GetSession(cookie.Value)
 		if err != nil {
-			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: " + err.Error(), http.StatusUnauthorized)
 			return
 		}
 

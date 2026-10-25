@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/password"
 	_ "github.com/lib/pq"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const schemaSQL = `
@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS group_database_access (
 );
 `
 
+var platformDB *sql.DB
+
 func InitPlatformDB(connStr string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -80,6 +82,8 @@ func InitPlatformDB(connStr string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to seed admin user: %w", err)
 	}
 
+	platformDB = db
+
 	return db, nil
 }
 
@@ -94,14 +98,11 @@ func seedDefaultAdmin(db *sql.DB) error {
 		return nil
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
+	passwordHash, _ := password.HashPassword("admin123")
 
 	_, err = db.Exec(
 		"INSERT INTO users (username, password_hash, name, role) VALUES ($1, $2, $3, $4)",
-		"admin", string(hashedPassword), "System Administrator", "Admin",
+		"admin", passwordHash, "System Administrator", "Admin",
 	)
 	return err
 }

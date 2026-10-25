@@ -27,6 +27,7 @@ type DatabasesData struct {
 type LoginData struct {
 	BaseData
 	Username string
+	CSRFToken string
 }
 
 type DBConnectionItem struct {
