@@ -23,8 +23,8 @@ func NewAuthHandler(db *sql.DB, sessionStore *SessionStore) *AuthHandler {
 }
 
 type LoginRequest struct {
-	Username  string `json:"username"`
-	Password  string `json:"password"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 		Username: r.FormValue("username"),
 		Password: r.FormValue("password"),
 	}
-	
+
 	// Ambil user dari database
 	var userID int
 	var passwordHash string
@@ -92,16 +92,16 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 		Value:    sess.ID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure: true,
+		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  sess.ExpiresAt,
 	})
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "csrf_login_cookie",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
+		Name:   "csrf_login_cookie",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
 	})
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -118,12 +118,12 @@ func loginAsGuest(w http.ResponseWriter) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure: true,
+		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 	})
 	web.RenderTemplate(w, "login.html", web.LoginData{
 		BaseData: web.BaseData{
-			Name: "",
+			Name: "Guest",
 			Role: "Guest",
 		},
 		CSRFToken: token,
