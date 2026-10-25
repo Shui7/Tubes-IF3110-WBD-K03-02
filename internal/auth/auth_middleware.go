@@ -32,7 +32,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 2. Validasi sesi melalui SessionStore (mengecek idle timeout, absolute expiration, & grace period)[cite: 1]
 		session, err := m.sessionStore.GetSession(cookie.Value)
 		if err != nil {
-			http.Error(w, "Unauthorized: " + err.Error(), http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
 
@@ -42,6 +42,9 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 4. Proteksi CSRF untuk request yang mengubah state (POST, PUT, DELETE, PATCH)[cite: 1]
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch {
 			clientCSRF := r.Header.Get("X-CSRF-Token")
+			if clientCSRF == "" {
+				clientCSRF = r.FormValue("csrf_token")
+			}
 			if clientCSRF == "" || clientCSRF != session.CSRFToken {
 				http.Error(w, "Forbidden: invalid or missing CSRF token", http.StatusForbidden)
 				return

@@ -7,10 +7,11 @@ import (
 )
 
 type BaseData struct {
-	Name    string
-	Role    string
-	Error   string
-	Success string
+	Name      string
+	Role      string
+	Error     string
+	Success   string
+	CSRFToken string
 }
 
 type DatabaseItem struct {
@@ -26,7 +27,7 @@ type DatabasesData struct {
 
 type LoginData struct {
 	BaseData
-	Username string
+	Username  string
 	CSRFToken string
 }
 

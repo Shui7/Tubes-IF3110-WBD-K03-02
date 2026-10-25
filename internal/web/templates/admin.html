@@ -98,7 +98,7 @@
                 <p class="muted">Register a new target PostgreSQL database instance for management.</p>
 
                 <form method="POST" action="/admin/connections/add">
-                    <input type="hidden" name="csrf_token" value="">
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div class="form-group">
                         <label for="conn_database">Database Name</label>
@@ -175,7 +175,7 @@
             <div class="form-card mt-1">
                 <h3>Create User Group</h3>
                 <form method="POST" action="/admin/groups/add">
-                    <input type="hidden" name="csrf_token" value="">
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div class="form-group">
                         <label for="group_name">Group Name</label>
@@ -235,7 +235,7 @@
             <div class="form-card mt-1">
                 <h3>Grant Database Access to Group</h3>
                 <form method="POST" action="/admin/permissions/grant">
-                    <input type="hidden" name="csrf_token" value="">
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
                         <div class="form-group">
@@ -332,7 +332,7 @@
             <div class="form-card mt-1">
                 <h3>Create New User</h3>
                 <form method="POST" action="/admin/users/add">
-                    <input type="hidden" name="csrf_token" value="">
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                         <div class="form-group">

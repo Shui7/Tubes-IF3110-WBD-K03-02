@@ -145,8 +145,6 @@ func InitPlatformDB(connStr string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to seed admin user: %w", err)
 	}
 
-	platformDB = db
-
 	return db, nil
 }
 
@@ -165,7 +163,7 @@ func seedDefaultAdmin(db *sql.DB) error {
 
 	_, err = db.Exec(
 		"INSERT INTO users (username, password_hash, name, role) VALUES ($1, $2, $3, $4)",
-		"admin", string(hashedPassword), "System Administrator", "Admin",
+		"admin", passwordHash, "System Administrator", "Admin",
 	)
 	return err
 }
