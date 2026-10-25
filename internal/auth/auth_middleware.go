@@ -25,14 +25,14 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 1. Ambil cookie session_id dari request
 		cookie, err := r.Cookie("session_id")
 		if err != nil {
-			http.Error(w, "Unauthorized: missing session cookie", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login", http.StatusFound);
 			return
 		}
 
 		// 2. Validasi sesi melalui SessionStore (mengecek idle timeout, absolute expiration, & grace period)[cite: 1]
 		session, err := m.sessionStore.GetSession(cookie.Value)
 		if err != nil {
-			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+			http.Redirect(w, r, "/login", http.StatusFound);
 			return
 		}
 
