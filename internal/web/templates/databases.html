@@ -12,8 +12,10 @@
         <nav class="nav-links">
             <a href="/">Home</a>
             <a href="/databases" class="active">Databases</a>
+            <a href="/admin">Admin</a>
         </nav>
         <div class="nav-right">
+            <a href="/login" class="btn btn-outline btn-sm">Login</a>
             <form method="POST" action="/logout">
                 <button type="submit" class="btn btn-danger btn-sm">Logout</button>
             </form>
@@ -23,8 +25,8 @@
     <main>
         <div class="page-header">
             <h1>Databases</h1>
-            {{ if eq .Role "..." }}
-            <a class="btn btn-outline" href="/admin/connections">Manage connections</a>
+            {{ if or (eq .Role "Admin") (eq .Role "Admin") }}
+            <a class="btn btn-outline" href="/admin">Manage connections</a>
             {{ end }}
         </div>
 
@@ -82,7 +84,7 @@
                 <tbody>
                     <tr>
                         <td colspan="4" class="empty center">
-                            You don't have access to any database yet. Ask a Platform Admin to grant your group access.
+                            You don't have access to any database yet. Ask an Admin to grant your group access.
                         </td>
                     </tr>
                 </tbody>

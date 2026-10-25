@@ -24,6 +24,52 @@ type DatabasesData struct {
 	Databases []DatabaseItem
 }
 
+type LoginData struct {
+	BaseData
+	Username string
+}
+
+type DBConnectionItem struct {
+	ID       int
+	Database string
+	Host     string
+	Port     int
+	User     string
+	Status   string // "Connected", "Failed", "Untested"
+}
+
+type GroupItem struct {
+	ID          int
+	Name        string
+	MemberCount int
+}
+
+type UserItem struct {
+	ID       int
+	Username string
+	Name     string
+	Role     string // "Admin", "User"
+	Groups   []string
+}
+
+type GroupPermissionItem struct {
+	ID           int
+	GroupID      int
+	GroupName    string
+	DatabaseID   int
+	DatabaseName string
+	AccessLevel  string // "view" or "edit"
+}
+
+type AdminData struct {
+	BaseData
+	ActiveTab   string
+	Connections []DBConnectionItem
+	Groups      []GroupItem
+	Users       []UserItem
+	Permissions []GroupPermissionItem
+}
+
 //go:embed templates/*.html
 var templates embed.FS
 
