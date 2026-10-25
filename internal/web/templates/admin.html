@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Platform Administration | Database Management Platform</title>
+</head>
+
+<body>
+    <header class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/databases">Databases</a>
+            <a href="/admin" class="active">Admin</a>
+        </nav>
+        <div class="nav-right">
+            <span class="muted mono">{{ .Name }}</span>
+            <form method="POST" action="/logout">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-header">
+            <div>
+                <h1>Platform Administration</h1>
+            </div>
+        </div>
+
+        {{ with .Error }}
+        <div class="alert alert-error">{{ . }}</div>
+        {{ end }}
+        {{ with .Success }}
+        <div class="alert alert-success">{{ . }}</div>
+        {{ end }}
+
+        <div class="tabs" id="admin-tabs">
+            <a href="#connections" class="tab-link active" data-tab="connections">Database Connections</a>
+            <a href="#groups" class="tab-link" data-tab="groups">User Groups</a>
+            <a href="#users" class="tab-link" data-tab="users">Users</a>
+            <a href="#permissions" class="tab-link" data-tab="permissions">Group Permissions</a>
+        </div>
+
+        <section id="tab-connections" class="tab-content">
+            <div class="page-header">
+                <h2>PostgreSQL Database Connections</h2>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Database</th>
+                            <th>Host:Port</th>
+                            <th>DB User</th>
+                            <th>Status</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Connections }}
+                        {{ range .Connections }}
+                        <tr>
+                            <td class="mono">{{ .Database }}</td>
+                            <td class="mono">{{ .Host }}:{{ .Port }}</td>
+                            <td class="mono">{{ .User }}</td>
+                            <td>
+                                {{ if eq .Status "Connected" }}
+                                <span class="badge badge-success">Connected</span>
+                                {{ else if eq .Status "Failed" }}
+                                <span class="badge badge-failed">Connection Failed</span>
+                                {{ else }}
+                                <span class="badge badge-pending">{{ .Status }}</span>
+                                {{ end }}
+                            </td>
+                            <td class="text-right">
+                                <button type="button" class="btn btn-outline btn-sm">Edit</button>
+                                <button type="button" class="btn btn-danger btn-sm">Delete</button>
+                            </td>
+                        </tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr>
+                            <td colspan="6" class="empty center">No database connections configured yet.</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form-card mt-1">
+                <h3>Add PostgreSQL Connection</h3>
+                <p class="muted">Register a new target PostgreSQL database instance for management.</p>
+
+                <form method="POST" action="/admin/connections/add">
+                    <input type="hidden" name="csrf_token" value="">
+
+                    <div class="form-group">
+                        <label for="conn_database">Database Name</label>
+                        <input type="text" id="conn_database" name="database" required placeholder="e.g. sales_db">
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="conn_host">Host</label>
+                            <input type="text" id="conn_host" name="host" required
+                                placeholder="localhost or db.internal">
+                        </div>
+                        <div class="form-group">
+                            <label for="conn_port">Port</label>
+                            <input type="number" id="conn_port" name="port" value="5432" required placeholder="5432">
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="conn_user">Database Username</label>
+                            <input type="text" id="conn_user" name="user" required placeholder="postgres">
+                        </div>
+                        <div class="form-group">
+                            <label for="conn_password">Database Password</label>
+                            <input type="password" id="conn_password" name="password" required placeholder="••••••••">
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Add Database Connection</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section id="tab-groups" class="tab-content" style="display: none;">
+            <div class="page-header">
+                <h2>User Groups</h2>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Group Name</th>
+                            <th>Description</th>
+                            <th>Members Count</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Groups }}
+                        {{ range .Groups }}
+                        <tr>
+                            <td class="mono font-bold"><strong>{{ .Name }}</strong></td>
+                            <td>{{ .Description }}</td>
+                            <td><span class="badge">{{ .MemberCount }} members</span></td>
+                            <td class="text-right">
+                                <button type="button" class="btn btn-outline btn-sm">Edit</button>
+                                <button type="button" class="btn btn-danger btn-sm">Delete</button>
+                            </td>
+                        </tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr>
+                            <td colspan="4" class="empty center">No groups created yet.</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form-card mt-1">
+                <h3>Create User Group</h3>
+                <form method="POST" action="/admin/groups/add">
+                    <input type="hidden" name="csrf_token" value="">
+
+                    <div class="form-group">
+                        <label for="group_name">Group Name</label>
+                        <input type="text" id="group_name" name="name" required placeholder="e.g. backend-developers">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="group_desc">Description</label>
+                        <textarea id="group_desc" name="description" rows="2"
+                            placeholder="Describe the role or team of this group"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create Group</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section id="tab-users" class="tab-content" style="display: none;">
+            <div class="page-header">
+                <h2>Platform Users</h2>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Name</th>
+                            <th>Role</th>
+                            <th>Assigned Groups</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Users }}
+                        {{ range .Users }}
+                        <tr>
+                            <td class="mono"><strong>{{ .Username }}</strong></td>
+                            <td>{{ .Name }}</td>
+                            <td>
+                                {{ if eq .Role "Admin" }}
+                                <span class="badge badge-edit">Admin</span>
+                                {{ else }}
+                                <span class="badge badge-view">User</span>
+                                {{ end }}
+                            </td>
+                            <td>
+                                {{ if .Groups }}
+                                {{ range .Groups }}
+                                <span class="badge">{{ . }}</span>
+                                {{ end }}
+                                {{ else }}
+                                <span class="muted">No groups</span>
+                                {{ end }}
+                            </td>
+                            <td class="text-right">
+                                <button type="button" class="btn btn-outline btn-sm">Assign Groups</button>
+                                <button type="button" class="btn btn-danger btn-sm">Delete</button>
+                            </td>
+                        </tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr>
+                            <td colspan="5" class="empty center">No users found.</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form-card mt-1">
+                <h3>Create New User</h3>
+                <form method="POST" action="/admin/users/add">
+                    <input type="hidden" name="csrf_token" value="">
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="user_username">Username</label>
+                            <input type="text" id="user_username" name="username" required autocomplete="username"
+                                placeholder="johndoe">
+                        </div>
+                        <div class="form-group">
+                            <label for="user_fullname">Full Name</label>
+                            <input type="text" id="user_fullname" name="fullname" required placeholder="John Doe">
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="user_password">Password</label>
+                            <input type="password" id="user_password" name="password" required
+                                autocomplete="new-password" placeholder="••••••••">
+                        </div>
+                        <div class="form-group">
+                            <label for="user_role">System Role</label>
+                            <select id="user_role" name="role">
+                                <option value="User">User</option>
+                                <option value="Admin">Admin</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Assign to Groups</label>
+                        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                            {{ range .Groups }}
+                            <label
+                                style="display: inline-flex; align-items: center; gap: 0.5rem; font-weight: normal; cursor: pointer;">
+                                <input type="checkbox" name="groups" value="{{ .Name }}"> {{ .Name }}
+                            </label>
+                            {{ end }}
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Create User</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section id="tab-permissions" class="tab-content" style="display: none;">
+            <div class="page-header">
+                <h2>Group Database Permissions</h2>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Group</th>
+                            <th>Target Database</th>
+                            <th>Access Level</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ if .Permissions }}
+                        {{ range .Permissions }}
+                        <tr>
+                            <td class="mono font-bold">{{ .GroupName }}</td>
+                            <td class="mono">{{ .DatabaseName }}</td>
+                            <td>
+                                {{ if eq .AccessLevel "edit" }}
+                                <span class="badge badge-edit">View + Edit</span>
+                                {{ else }}
+                                <span class="badge badge-view">View Only</span>
+                                {{ end }}
+                            </td>
+                            <td class="text-right">
+                                <button type="button" class="btn btn-outline btn-sm">Edit Level</button>
+                            </td>
+                        </tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr>
+                            <td colspan="5" class="empty center">No group permissions granted yet.</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form-card mt-1">
+                <h3>Grant Database Access to Group</h3>
+                <form method="POST" action="/admin/permissions/grant">
+                    <input type="hidden" name="csrf_token" value="">
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="perm_group">Target Group</label>
+                            <select id="perm_group" name="group_id" required>
+                                <option value="">-- Select Group --</option>
+                                {{ range .Groups }}
+                                <option value="{{ .ID }}">{{ .Name }}</option>
+                                {{ end }}
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="perm_db">Target Database</label>
+                            <select id="perm_db" name="database_id" required>
+                                <option value="">-- Select Database --</option>
+                                {{ range .Connections }}
+                                <option value="{{ .ID }}">{{ .Name }} ({{ .Database }})</option>
+                                {{ end }}
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="perm_access">Access Level</label>
+                            <select id="perm_access" name="access_level" required>
+                                <option value="view">View Only (Schema, Data, History)</option>
+                                <option value="edit">View + Edit (Migrations, DDL, DML)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Grant Access</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+
+    <script>
+        (function () {
+            const tabs = document.querySelectorAll('#admin-tabs .tab-link');
+            const sections = document.querySelectorAll('.tab-content');
+
+            function switchTab(targetTab) {
+                tabs.forEach(t => {
+                    if (t.dataset.tab === targetTab) {
+                        t.classList.add('active');
+                    } else {
+                        t.classList.remove('active');
+                    }
+                });
+
+                sections.forEach(s => {
+                    if (s.id === 'tab-' + targetTab) {
+                        s.style.display = 'block';
+                    } else {
+                        s.style.display = 'none';
+                    }
+                });
+            }
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const tabKey = this.dataset.tab;
+                    window.location.hash = tabKey;
+                    switchTab(tabKey);
+                });
+            });
+
+            // Check URL hash or query param on load
+            const hash = window.location.hash.replace('#', '');
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryTab = urlParams.get('tab');
+            const initialTab = hash || queryTab || '{{ .ActiveTab }}' || 'connections';
+
+            if (document.getElementById('tab-' + initialTab)) {
+                switchTab(initialTab);
+            }
+        })();
+    </script>
+</body>
+
+</html>

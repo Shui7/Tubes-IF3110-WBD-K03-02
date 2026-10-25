@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Login | Database Management Platform</title>
+</head>
+<body>
+    <header class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav class="nav-links">
+            <a href="/">Home</a>
+            <a href="/databases">Databases</a>
+            <a href="/admin">Admin</a>
+        </nav>
+        <div class="nav-right">
+            <a href="/login" class="btn btn-outline btn-sm active">Login</a>
+        </div>
+    </header>
+
+    <main class="narrow">
+        <div class="page-header text-center">
+            <h1>Sign In</h1>
+        </div>
+
+        {{ with .Error }}
+        <div class="alert alert-error">{{ . }}</div>
+        {{ end }}
+        {{ with .Success }}
+        <div class="alert alert-success">{{ . }}</div>
+        {{ end }}
+
+        <div class="form-card">
+            <form method="POST" action="/login">
+                <input type="hidden" name="csrf_token" value="">
+
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" value="{{ .Username }}" required autofocus autocomplete="username" placeholder="Enter username">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Sign In</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+</body>
+</html>
