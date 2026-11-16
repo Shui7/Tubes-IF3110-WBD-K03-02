@@ -14,7 +14,8 @@ import (
 func (m *Manager) EnsureMigrationTable(ctx context.Context) error {
 	_, err := m.db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS db_platform_migrations (
-			version BIGINT PRIMARY KEY,
+			id BIGSERIAL PRIMARY KEY,
+			version BIGINT NOT NULL,
 			sql_text TEXT NOT NULL,
 			executed_by TEXT NOT NULL,
 			status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
@@ -42,7 +43,7 @@ func (m *Manager) ListMigrations(ctx context.Context) ([]Migration, error) {
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT version, sql_text, executed_by, status, error_message, executed_at
 		FROM db_platform_migrations
-		ORDER BY version`)
+		ORDER BY version, id`)
 	if err != nil && isUndefinedTableError(err) {
 		return []Migration{}, nil
 	}
@@ -72,7 +73,8 @@ func (m *Manager) GetMigration(ctx context.Context, version int64) (Migration, e
 	var migration Migration
 	err := m.db.QueryRowContext(ctx, `
 		SELECT version, sql_text, executed_by, status, error_message, executed_at
-		FROM db_platform_migrations WHERE version = $1`, version).Scan(
+		FROM db_platform_migrations WHERE version = $1
+		ORDER BY id DESC LIMIT 1`, version).Scan(
 		&migration.Version, &migration.SQL, &migration.ExecutedBy,
 		&migration.Status, &migration.Error, &migration.ExecutedAt,
 	)
@@ -175,13 +177,7 @@ func (m *Manager) recordMigrationFailure(ctx context.Context, version int64, mig
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO db_platform_migrations
 			(version, sql_text, executed_by, status, error_message)
-		VALUES ($1, $2, $3, 'failed', $4)
-		ON CONFLICT (version) DO UPDATE
-		SET sql_text = EXCLUDED.sql_text,
-		    executed_by = EXCLUDED.executed_by,
-		    status = EXCLUDED.status,
-		    error_message = EXCLUDED.error_message,
-		    executed_at = CURRENT_TIMESTAMP`,
+		VALUES ($1, $2, $3, 'failed', $4)`,
 		version, migrationSQL, executedBy, message); err != nil {
 		return fmt.Errorf("record failed migration: %w", err)
 	}

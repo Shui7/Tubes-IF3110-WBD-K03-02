@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS db_platform_migrations (
-    version BIGINT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    version BIGINT NOT NULL,
     sql_text TEXT NOT NULL,
     executed_by TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
