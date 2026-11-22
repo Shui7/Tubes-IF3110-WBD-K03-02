@@ -15,7 +15,7 @@ services:
       timeout: 5s
       retries: 10
 
-  dbsamples:
+  dbsamples-1:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -24,6 +24,25 @@ services:
       POSTGRES_DB: ${DBSAMPLES_DB:-dbsamples}
     ports:
       - "${DBSAMPLES_PORT:-5433}:5432"
+    volumes:
+      - samplesdata:/var/lib/postgresql/data
+      - ./db/sample:/sample:ro
+      - ./db/init-samples.sh:/docker-entrypoint-initdb.d/init-samples.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DBSAMPLES_USER:-postgres} -d ${DBSAMPLES_DB:-dbsamples}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  
+  dbsamples-2:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DBSAMPLES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DBSAMPLES_PASSWORD:-postgres}
+      POSTGRES_DB: ${DBSAMPLES_DB:-dbsamples}
+    ports:
+      - "5434:5433"
     volumes:
       - samplesdata:/var/lib/postgresql/data
       - ./db/sample:/sample:ro
@@ -46,8 +65,6 @@ services:
       - "${APP_PORT:-8080}:8080"
     depends_on:
       dbplatform:
-        condition: service_healthy
-      dbsamples:
         condition: service_healthy
 
 volumes:

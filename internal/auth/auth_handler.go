@@ -29,7 +29,7 @@ type LoginRequest struct {
 
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		loginAsGuest(w)
+		loginAsGuest(w, r)
 		return
 	}
 
@@ -107,20 +107,30 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func loginAsGuest(w http.ResponseWriter) {
-	token, err := generateToken(32)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+func loginAsGuest(w http.ResponseWriter, r *http.Request) {
+	token := ""
+
+	cookie, err := r.Cookie("csrf_login_cookie")
+	if err == nil && cookie.Value != "" {
+		token = cookie.Value
+	} else {
+		token, err = generateToken(32)
+		if err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "csrf_login_cookie",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+		})
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "csrf_login_cookie",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
+
+	w.Header().Set("Cache-Control", "no-store")
 	web.RenderTemplate(w, "login.html", web.LoginData{
 		BaseData: web.BaseData{
 			Name: "Guest",
