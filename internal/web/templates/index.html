@@ -15,16 +15,9 @@
         <nav id="nav-links" class="nav-links">
             <a href="/">Home</a>
             <a href="/databases">Databases</a>
-            {{ if eq .Role "Admin" }}
             <a id="nav-link-admin" href="/admin" class="active">Admin</a>
-            {{ end }}
         </nav>
-        <div class="nav-right">
-            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
-            <form method="POST" action="/logout">
-                <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
-                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
-            </form>
+        <div id="nav-right" class="nav-right">
         </div>
     </header>
     
