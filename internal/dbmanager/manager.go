@@ -60,12 +60,19 @@ type Relationship struct {
 type Row map[string]any
 
 type Migration struct {
-	Version    int64
-	SQL        string
-	ExecutedBy string
-	Status     string
-	Error      sql.NullString
-	ExecutedAt sql.NullTime
+	ExecutionID        int64
+	Version            int64
+	SQL                string
+	ExecutedSQL        string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason sql.NullString
+	ExecutedBy         string
+	Action             string
+	TargetExecutionID  sql.NullInt64
+	Status             string
+	Error              sql.NullString
+	ExecutedAt         sql.NullTime
 }
 
 type MigrationDraft struct {

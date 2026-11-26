@@ -208,11 +208,16 @@
 
         <section id="tab-migrations" class="tab-content" style="display: none;">
             <h2>Migration History</h2>
+            <div class="form-group">
+                <label><input type="checkbox" id="hide-rollback"> Hide rollback</label>
+                <p class="muted">Hides a successful rollback and the exact execution it reverted. Failed attempts and later forward executions remain visible.</p>
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
                             <th>Version</th>
+                            <th>Action / Execution</th>
                             <th>Description</th>
                             <th>Executed By</th>
                             <th>Executed At</th>
@@ -222,8 +227,9 @@
                     <tbody>
                         {{ if .Migrations }}
                         {{ range .Migrations }}
-                        <tr>
+                        <tr class="migration-history-row" data-execution-id="{{ .ExecutionID }}" data-action="{{ .Action }}" data-status="{{ .Status }}" data-target-execution-id="{{ .TargetExecutionID }}">
                             <td class="mono font-bold">{{ .Version }}</td>
+                            <td><span class="badge">{{ .Action }} #{{ .ExecutionID }}</span>{{ if .TargetExecutionID }}<br><span class="muted">targets #{{ .TargetExecutionID }}</span>{{ end }}</td>
                             <td>{{ .Name }}</td>
                             <td>{{ .ExecutedBy }}</td>
                             <td class="mono">{{ .ExecutedAt }}</td>
@@ -235,10 +241,41 @@
                                 {{ end }}
                             </td>
                         </tr>
+                        <tr class="migration-history-row" data-execution-id="{{ .ExecutionID }}" data-action="{{ .Action }}" data-status="{{ .Status }}" data-target-execution-id="{{ .TargetExecutionID }}">
+                            <td colspan="6">
+                                {{ if and (eq $.Database.AccessLevel "edit") .CanRollback }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/rollback" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <input type="hidden" name="execution_id" value="{{ .ExecutionID }}">
+                                    <button type="submit" class="btn btn-outline btn-sm">Rollback</button>
+                                </form>
+                                {{ end }}
+                                {{ if and (eq $.Database.AccessLevel "edit") .CanForward }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/forward" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <input type="hidden" name="execution_id" value="{{ .ExecutionID }}">
+                                    <button type="submit" class="btn btn-outline btn-sm">Forward</button>
+                                </form>
+                                {{ end }}
+                                <details>
+                                    <summary>Migration definition</summary>
+                                    <p><strong>SQL executed by this attempt</strong></p>
+                                    <pre class="mono">{{ .ExecutedSQL }}</pre>
+                                    <p><strong>SQL up</strong></p>
+                                    <pre class="mono">{{ .SQL }}</pre>
+                                    {{ if .Irreversible }}
+                                    <p><strong>Irreversible:</strong> {{ .IrreversibleReason }}</p>
+                                    {{ else }}
+                                    <p><strong>SQL down</strong></p>
+                                    <pre class="mono">{{ .SQLDown }}</pre>
+                                    {{ end }}
+                                </details>
+                            </td>
+                        </tr>
                         {{ end }}
                         {{ else }}
                         <tr>
-                            <td colspan="5" class="empty center">No migration history recorded.</td>
+                            <td colspan="6" class="empty center">No migration history recorded.</td>
                         </tr>
                         {{ end }}
                     </tbody>
@@ -258,9 +295,24 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="migration_sql">Migration SQL</label>
-                        <textarea id="migration_sql" class="sql-editor" name="sql" rows="8"
+                        <label for="migration_sql_up">SQL up</label>
+                        <textarea id="migration_sql_up" class="sql-editor" name="sql_up" rows="8" required
                             placeholder="ALTER TABLE orders ADD COLUMN discount NUMERIC(10, 2) DEFAULT 0.00;"></textarea>
+                    </div>
+
+                    <div class="form-group" id="sql-down-group">
+                        <label for="migration_sql_down">SQL down</label>
+                        <textarea id="migration_sql_down" class="sql-editor" name="sql_down" rows="8"
+                            placeholder="ALTER TABLE orders DROP COLUMN discount;"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label><input type="checkbox" id="migration_irreversible" name="irreversible"> Mark as irreversible</label>
+                    </div>
+                    <div class="form-group" id="irreversible-reason-group" hidden>
+                        <label for="irreversible_reason">Reason</label>
+                        <textarea id="irreversible_reason" name="irreversible_reason" rows="3"
+                            placeholder="Explain why this migration cannot be safely reversed."></textarea>
                     </div>
 
                     <div class="form-actions">
@@ -287,6 +339,45 @@
     </footer>
 
     <script>
+        (function () {
+            const hideRollback = document.getElementById('hide-rollback');
+            if (!hideRollback) return;
+            const historyRows = Array.from(document.querySelectorAll('.migration-history-row'));
+            function updateRollbackFilter() {
+                const hiddenExecutionIDs = new Set();
+                if (hideRollback.checked) {
+                    historyRows.forEach(row => {
+                        if (row.dataset.action === 'rollback' && row.dataset.status === 'success') {
+                            hiddenExecutionIDs.add(row.dataset.executionId);
+                            if (row.dataset.targetExecutionId) {
+                                hiddenExecutionIDs.add(row.dataset.targetExecutionId);
+                            }
+                        }
+                    });
+                }
+                historyRows.forEach(row => {
+                    row.hidden = hiddenExecutionIDs.has(row.dataset.executionId);
+                });
+            }
+            hideRollback.addEventListener('change', updateRollbackFilter);
+        })();
+
+        (function () {
+            const irreversible = document.getElementById('migration_irreversible');
+            const down = document.getElementById('migration_sql_down');
+            const downGroup = document.getElementById('sql-down-group');
+            const reasonGroup = document.getElementById('irreversible-reason-group');
+            const reason = document.getElementById('irreversible_reason');
+            function updateDefinitionFields() {
+                downGroup.hidden = irreversible.checked;
+                down.required = !irreversible.checked;
+                reasonGroup.hidden = !irreversible.checked;
+                reason.required = irreversible.checked;
+            }
+            irreversible.addEventListener('change', updateDefinitionFields);
+            updateDefinitionFields();
+        })();
+
         (function () {
             const tabs = document.querySelectorAll('#detail-tabs .tab-link');
             const sections = document.querySelectorAll('.tab-content');

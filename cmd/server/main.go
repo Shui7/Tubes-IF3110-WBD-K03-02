@@ -219,14 +219,22 @@ func databases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(parts) == 2 && parts[1] == "migrations" {
+	if len(parts) >= 2 && parts[1] == "migrations" {
 		// Only View+Edit users may execute migrations (POST). View-only users can still
 		// reach this route via GET (which just redirects back to the detail page).
 		if r.Method == http.MethodPost && level != authz.AccessEdit {
 			http.Error(w, "Forbidden: edit access required to execute migrations", http.StatusForbidden)
 			return
 		}
-		handleMigration(id, w, r)
+		if len(parts) > 3 || (len(parts) == 3 && parts[2] != "rollback" && parts[2] != "forward") {
+			http.NotFound(w, r)
+			return
+		}
+		operation := ""
+		if len(parts) == 3 {
+			operation = parts[2]
+		}
+		handleMigration(id, operation, w, r)
 		return
 	}
 	if len(parts) != 1 || r.Method != http.MethodGet {
@@ -367,7 +375,7 @@ func renderDatabaseError(w http.ResponseWriter, r *http.Request, id int, name, t
 	})
 }
 
-func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
+func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(id), http.StatusSeeOther)
 		return
@@ -375,17 +383,32 @@ func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
 	manager, _, err := openManagedDatabase(r.Context(), id)
 	if err == nil {
 		defer manager.Close()
-		version, versionErr := manager.NextMigrationVersion(r.Context())
-		err = versionErr
-		if err == nil {
-			err = manager.ExecuteMigration(r.Context(), version, r.FormValue("sql"), currentUser(r).Name)
+		switch operation {
+		case "rollback", "forward":
+			targetID, parseErr := strconv.ParseInt(r.FormValue("execution_id"), 10, 64)
+			err = parseErr
+			if err == nil && operation == "rollback" {
+				err = manager.RollbackMigration(r.Context(), targetID, currentUser(r).Name)
+			} else if err == nil {
+				err = manager.ForwardMigration(r.Context(), targetID, currentUser(r).Name)
+			}
+		default:
+			version, versionErr := manager.NextMigrationVersion(r.Context())
+			err = versionErr
+			if err == nil {
+				irreversible := r.FormValue("irreversible") == "on"
+				err = manager.ExecuteMigrationDefinition(r.Context(), version, r.FormValue("sql_up"), r.FormValue("sql_down"), irreversible, r.FormValue("irreversible_reason"), currentUser(r).Name)
+			}
 		}
 	}
 	if err != nil {
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
-	message := "Migration executed successfully."
+	message := "Migration " + operation + " executed successfully."
+	if operation == "" {
+		message = "Migration executed successfully."
+	}
 	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
 		message = name + " executed successfully."
 	}
@@ -439,15 +462,58 @@ func convertRows(rows []dbmanager.Row, columns []web.ColumnItem) ([]string, [][]
 
 func convertMigrations(migrations []dbmanager.Migration) []web.MigrationHistoryItem {
 	result := make([]web.MigrationHistoryItem, 0, len(migrations))
+	latestSuccess := make(map[int64]dbmanager.Migration)
+	for _, migration := range migrations {
+		if migration.Status == "success" {
+			prior, ok := latestSuccess[migration.Version]
+			if !ok || migration.ExecutionID > prior.ExecutionID {
+				latestSuccess[migration.Version] = migration
+			}
+		}
+	}
+	var highestActive int64
+	for version, migration := range latestSuccess {
+		if migration.Action == "up" || migration.Action == "forward" {
+			if version > highestActive {
+				highestActive = version
+			}
+		}
+	}
 	for _, migration := range migrations {
 		executedAt := ""
 		if migration.ExecutedAt.Valid {
 			executedAt = migration.ExecutedAt.Time.Format(time.RFC3339)
 		}
 		version := strconv.FormatInt(migration.Version, 10)
+		latest, isLatest := latestSuccess[migration.Version]
+		canRollback := isLatest && latest.ExecutionID == migration.ExecutionID && migration.Status == "success" &&
+			(migration.Action == "up" || migration.Action == "forward") && migration.Version == highestActive && !migration.Irreversible
+		canForward := isLatest && latest.ExecutionID == migration.ExecutionID && migration.Status == "success" &&
+			migration.Action == "rollback"
+		if canForward {
+			for higherVersion, active := range latestSuccess {
+				if higherVersion > migration.Version && (active.Action == "up" || active.Action == "forward") {
+					canForward = false
+					break
+				}
+			}
+			for lowerVersion, inactive := range latestSuccess {
+				if lowerVersion < migration.Version && inactive.Action == "rollback" {
+					canForward = false
+					break
+				}
+			}
+		}
+		targetExecutionID := int64(0)
+		if migration.TargetExecutionID.Valid {
+			targetExecutionID = migration.TargetExecutionID.Int64
+		}
 		result = append(result, web.MigrationHistoryItem{
-			Version: version, Name: "Migration " + version, ExecutedBy: migration.ExecutedBy,
-			ExecutedAt: executedAt, Status: migration.Status, SQL: migration.SQL,
+			ExecutionID: migration.ExecutionID,
+			Version:     version, Name: "Migration " + version, ExecutedBy: migration.ExecutedBy,
+			ExecutedAt: executedAt, Status: migration.Status, SQL: migration.SQL, ExecutedSQL: migration.ExecutedSQL, Action: migration.Action,
+			SQLDown: migration.SQLDown, Irreversible: migration.Irreversible, IrreversibleReason: nullStringValue(migration.IrreversibleReason),
+			TargetExecutionID: targetExecutionID, CanRollback: canRollback, CanForward: canForward,
 		})
 	}
 	return result

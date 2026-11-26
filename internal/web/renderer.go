@@ -99,12 +99,21 @@ type TableSummary struct {
 }
 
 type MigrationHistoryItem struct {
-	Version    string
-	Name       string
-	ExecutedBy string
-	ExecutedAt string
-	Status     string
-	SQL        string
+	ExecutionID        int64
+	Version            string
+	Name               string
+	ExecutedBy         string
+	ExecutedAt         string
+	Status             string
+	SQL                string
+	ExecutedSQL        string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	Action             string
+	TargetExecutionID  int64
+	CanRollback        bool
+	CanForward         bool
 }
 
 type DatabaseDetailData struct {
