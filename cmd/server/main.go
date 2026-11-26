@@ -18,12 +18,14 @@ import (
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/authz"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/jobs"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var platformDB *sql.DB
+var jobStore *jobs.Store
 var authHandler *auth.AuthHandler
 var authMiddleware *auth.AuthMiddleware
 
@@ -72,6 +74,11 @@ func main() {
 		} else {
 			platformDB = db
 			slog.Info("platformdb.initialized")
+			if err := jobs.EnsureSchema(ctx, db); err != nil {
+				slog.ErrorContext(ctx, "jobs.schema_failed", "error", err)
+				return
+			}
+			jobStore = jobs.NewStore(db).WithMaxPending(envPositiveInt("MAX_PENDING_JOBS_PER_DB", jobs.DefaultMaxPendingPerDatabase))
 		}
 	} else {
 		slog.Error("config.missing_database_url")
@@ -114,6 +121,7 @@ func main() {
 	http.Handle("/admin/users/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
+	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
@@ -372,24 +380,49 @@ func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(id), http.StatusSeeOther)
 		return
 	}
-	manager, _, err := openManagedDatabase(r.Context(), id)
-	if err == nil {
-		defer manager.Close()
-		version, versionErr := manager.NextMigrationVersion(r.Context())
-		err = versionErr
-		if err == nil {
-			err = manager.ExecuteMigration(r.Context(), version, r.FormValue("sql"), currentUser(r).Name)
-		}
-	}
-	if err != nil {
-		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+	back := "/databases/" + strconv.Itoa(id)
+	if jobStore == nil {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("job queue is unavailable")+"#migrations", http.StatusSeeOther)
 		return
 	}
-	message := "Migration executed successfully."
-	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
-		message = name + " executed successfully."
+
+	job, err := jobStore.Enqueue(r.Context(), jobs.EnqueueRequest{
+		DatabaseID:  id,
+		Kind:        "up",
+		Name:        strings.TrimSpace(r.FormValue("name")),
+		SQL:         r.FormValue("sql"),
+		RequestedBy: currentUser(r).Name,
+		RequestID:   observability.RequestIDFromContext(r.Context()),
+	})
+	if err != nil {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+		return
 	}
-	http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+	slog.InfoContext(r.Context(), "job.enqueued", "job_id", job.ID, "database_id", id,
+		"actor", job.RequestedBy, "kind", job.Kind)
+
+	message := "Migration queued (job " + job.ID + "). Reload this page to see the result."
+	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
+		message = name + " queued (job " + job.ID + "). Reload this page to see the result."
+	}
+	http.Redirect(w, r, back+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func envPositiveInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
+
+// canViewDatabase reports whether the logged-in user has at least view access.
+func canViewDatabase(r *http.Request, databaseID int) bool {
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if sess == nil || platformDB == nil {
+		return false
+	}
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
+	return err == nil && level != authz.AccessNone
 }
 
 func convertColumns(columns []dbmanager.Column) []web.ColumnItem {
