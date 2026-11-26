@@ -164,15 +164,19 @@ func (m *Manager) ExecuteMigration(ctx context.Context, version int64, migration
 	return nil
 }
 
-// CommitError is returned when COMMIT of a migration transaction fails. If Err
-// is not a PostgreSQL error (connection lost, timeout), the transaction may or
-// may not have been committed.
+// CommitError is returned when COMMIT of a migration (or of one batch, when
+// Batch > 0) fails. If Err is not a PostgreSQL error (connection lost, timeout),
+// the transaction may or may not have been committed.
 type CommitError struct {
 	Version int64
+	Batch   int
 	Err     error
 }
 
 func (e *CommitError) Error() string {
+	if e.Batch > 0 {
+		return fmt.Sprintf("commit batch %d: %v", e.Batch, e.Err)
+	}
 	return fmt.Sprintf("commit migration %d: %v", e.Version, e.Err)
 }
 

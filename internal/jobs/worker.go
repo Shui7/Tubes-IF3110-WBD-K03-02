@@ -150,6 +150,11 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 	valSpan.End()
 	slog.InfoContext(ctx, "revalidation.result", "job_id", job.ID, "ok", true)
 
+	if job.Mode == ModeBatch {
+		w.processBatch(ctx, jobCtx, job)
+		return
+	}
+
 	version, err := w.exec.NextVersion(jobCtx, job.DatabaseID)
 	if err == nil {
 		// Persist the version first: crash recovery needs it to find evidence.
@@ -240,6 +245,17 @@ func (w *Worker) fail(ctx context.Context, job Job, cause error) {
 
 // resolveUncertain decides what happened to a job whose COMMIT result is unknown.
 func (w *Worker) resolveUncertain(sctx, logCtx context.Context, job Job) {
+	if job.Mode == ModeBatch {
+		// The checkpoints in the target database are the evidence, and the worker
+		// re-reads them when it runs the job again, so resuming is always safe.
+		if job.Attempt < job.MaxAttempts {
+			w.retry(sctx, logCtx, job, errors.New("previous attempt ended without a known outcome"))
+			return
+		}
+		w.stopBatch(sctx, logCtx, job, errors.New("attempts exhausted after an unknown outcome"))
+		return
+	}
+
 	applied := false
 	if job.Version.Valid {
 		ok, err := w.exec.WasApplied(sctx, job, job.Version.Int64)

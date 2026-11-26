@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -122,6 +123,8 @@ func main() {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
+	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(
+		requireCSRFHeader(jobs.ResumeHandler(jobStore, canViewDatabase, canEditDatabase))))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
@@ -386,9 +389,24 @@ func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "mode" is "plain" (default) or "batch"; batch mode also needs "batch_size".
+	batchSize := 0
+	if raw := strings.TrimSpace(r.FormValue("batch_size")); raw != "" {
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil {
+			http.Redirect(w, r, back+"?error="+url.QueryEscape("batch size must be a number")+"#migrations", http.StatusSeeOther)
+			return
+		}
+		batchSize = n
+	}
+
 	job, err := jobStore.Enqueue(r.Context(), jobs.EnqueueRequest{
 		DatabaseID:  id,
 		Kind:        "up",
+		Mode:        strings.TrimSpace(r.FormValue("mode")),
+		BatchSize:   batchSize,
+		BatchTable:  strings.TrimSpace(r.FormValue("batch_table")),
+		BatchColumn: strings.TrimSpace(r.FormValue("batch_column")),
 		Name:        strings.TrimSpace(r.FormValue("name")),
 		SQL:         r.FormValue("sql"),
 		RequestedBy: currentUser(r).Name,
@@ -399,7 +417,8 @@ func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.InfoContext(r.Context(), "job.enqueued", "job_id", job.ID, "database_id", id,
-		"actor", job.RequestedBy, "kind", job.Kind)
+		"actor", job.RequestedBy, "kind", job.Kind, "mode", job.Mode, "batch_size", job.BatchSize,
+		"batch_table", job.BatchTable, "batch_column", job.BatchColumn)
 
 	message := "Migration queued (job " + job.ID + "). Reload this page to see the result."
 	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
@@ -423,6 +442,31 @@ func canViewDatabase(r *http.Request, databaseID int) bool {
 	}
 	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
 	return err == nil && level != authz.AccessNone
+}
+
+// canEditDatabase reports whether the logged-in user has view+edit access.
+func canEditDatabase(r *http.Request, databaseID int) bool {
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if sess == nil || platformDB == nil {
+		return false
+	}
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
+	return err == nil && level == authz.AccessEdit
+}
+
+// requireCSRFHeader protects state-changing JSON endpoints: the request must carry
+// the session's CSRF token in the X-CSRF-Token header.
+func requireCSRFHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+		token := r.Header.Get("X-CSRF-Token")
+		if sess == nil || sess.CSRFToken == "" ||
+			subtle.ConstantTimeCompare([]byte(token), []byte(sess.CSRFToken)) != 1 {
+			http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func convertColumns(columns []dbmanager.Column) []web.ColumnItem {

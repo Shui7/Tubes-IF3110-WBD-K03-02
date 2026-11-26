@@ -23,7 +23,17 @@ const (
 	StatusSuccess   Status = "success"
 	StatusFailed    Status = "failed"
 	StatusUncertain Status = "uncertain"
-	// TODO: status partial / partially_reverted for batch mode.
+	// StatusPartial: a batch job stopped after committing at least one batch.
+	// The per-database lock stays held until the job is resumed or resolved.
+	StatusPartial Status = "partial"
+	// TODO: partially_reverted (compensation of committed batches).
+)
+
+const (
+	ModePlain = "plain"
+	ModeBatch = "batch"
+	// MaxBatchSize is an upper bound for the configurable batch size.
+	MaxBatchSize = 100000
 )
 
 // DefaultMaxPendingPerDatabase is the default limit of waiting jobs per database.
@@ -32,33 +42,47 @@ const DefaultMaxPendingPerDatabase = 100
 var (
 	ErrQueueFull = errors.New("the migration queue for this database is full")
 	ErrNotFound  = errors.New("job not found")
+	// ErrNotResumable is returned by Resume for a job that is not in 'partial' state.
+	ErrNotResumable = errors.New("only a partial job can be resumed")
 )
 
 type Job struct {
-	ID           string // same as execution_id
-	DatabaseID   int
-	Kind         string
-	Name         string
-	SQL          string
-	Version      sql.NullInt64
-	Status       Status
-	Attempt      int
-	MaxAttempts  int
-	RunAfter     time.Time
-	WorkerID     sql.NullString
-	Traceparent  string
-	RequestID    string
-	RequestedBy  string
-	LastError    sql.NullString
-	LastSQLState sql.NullString
-	CreatedAt    time.Time
-	StartedAt    sql.NullTime
-	FinishedAt   sql.NullTime
+	ID          string // same as execution_id
+	DatabaseID  int
+	Kind        string
+	Mode        string // "plain" or "batch"
+	BatchSize   int    // rows per batch (batch mode only)
+	BatchTable  string // "batch by attribute": table (or schema.table); empty = custom $1/$2 SQL
+	BatchColumn string // "batch by attribute": unique, unchanging column
+	Name        string
+	SQL         string
+	Version     sql.NullInt64
+	Status      Status
+	Attempt     int
+	MaxAttempts int
+	RunAfter    time.Time
+	WorkerID    sql.NullString
+	Traceparent string
+	RequestID   string
+	RequestedBy string
+	// Progress mirror for the API/SPA. The authoritative copy is the checkpoint
+	// table in the target database.
+	BatchesCommitted int
+	RowsCommitted    int64
+	LastError        sql.NullString
+	LastSQLState     sql.NullString
+	CreatedAt        time.Time
+	StartedAt        sql.NullTime
+	FinishedAt       sql.NullTime
 }
 
 type EnqueueRequest struct {
 	DatabaseID  int
 	Kind        string // "up" (default), "rollback", "forward"
+	Mode        string // "plain" (default) or "batch"
+	BatchSize   int    // required for batch mode, 1..MaxBatchSize
+	BatchTable  string // optional: with BatchColumn, the platform builds the cursor logic
+	BatchColumn string // optional: unique, unchanging column, e.g. id
 	Name        string
 	SQL         string
 	RequestedBy string
@@ -85,7 +109,9 @@ func (s *Store) WithMaxPending(n int) *Store {
 
 const jobColumns = `id, database_id, kind, name, sql_text, version, status, attempt, max_attempts,
 	run_after, worker_id, COALESCE(traceparent, ''), COALESCE(request_id, ''), requested_by,
-	last_error, last_sqlstate, created_at, started_at, finished_at`
+	last_error, last_sqlstate, created_at, started_at, finished_at,
+	mode, COALESCE(batch_size, 0), batches_committed, rows_committed,
+	COALESCE(batch_table, ''), COALESCE(batch_column, '')`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -93,7 +119,9 @@ func scanJob(row scanner) (Job, error) {
 	var j Job
 	err := row.Scan(&j.ID, &j.DatabaseID, &j.Kind, &j.Name, &j.SQL, &j.Version, &j.Status,
 		&j.Attempt, &j.MaxAttempts, &j.RunAfter, &j.WorkerID, &j.Traceparent, &j.RequestID,
-		&j.RequestedBy, &j.LastError, &j.LastSQLState, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
+		&j.RequestedBy, &j.LastError, &j.LastSQLState, &j.CreatedAt, &j.StartedAt, &j.FinishedAt,
+		&j.Mode, &j.BatchSize, &j.BatchesCommitted, &j.RowsCommitted,
+		&j.BatchTable, &j.BatchColumn)
 	return j, err
 }
 
@@ -127,6 +155,15 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (Job, error) {
 	if kind == "" {
 		kind = "up"
 	}
+	mode := req.Mode
+	if mode == "" {
+		mode = ModePlain
+	}
+	req.BatchTable = strings.TrimSpace(req.BatchTable)
+	req.BatchColumn = strings.TrimSpace(req.BatchColumn)
+	if err := validateBatchRequest(mode, req.BatchSize, req.SQL, req.BatchTable, req.BatchColumn); err != nil {
+		return Job{}, err
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -159,11 +196,14 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (Job, error) {
 
 	job, err := scanJob(tx.QueryRowContext(ctx, `
 		INSERT INTO migration_jobs
-			(id, database_id, kind, name, sql_text, sql_sha256, traceparent, request_id, requested_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(id, database_id, kind, name, sql_text, sql_sha256, traceparent, request_id, requested_by,
+			 mode, batch_size, batch_table, batch_column)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING `+jobColumns,
 		id, req.DatabaseID, kind, req.Name, req.SQL, hex.EncodeToString(sum[:]),
-		nullIfEmpty(observability.InjectTraceparent(ctx)), nullIfEmpty(req.RequestID), req.RequestedBy))
+		nullIfEmpty(observability.InjectTraceparent(ctx)), nullIfEmpty(req.RequestID), req.RequestedBy,
+		mode, sql.NullInt64{Int64: int64(req.BatchSize), Valid: mode == ModeBatch},
+		nullIfEmpty(req.BatchTable), nullIfEmpty(req.BatchColumn)))
 	if err != nil {
 		observability.RecordError(span, err)
 		return Job{}, fmt.Errorf("enqueue job: %w", err)
@@ -285,6 +325,44 @@ func (s *Store) MarkUncertain(ctx context.Context, id, message string) error {
 	return err
 }
 
+// UpdateProgress mirrors the committed batch counters into the job row.
+func (s *Store) UpdateProgress(ctx context.Context, id string, batches int, rows int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE migration_jobs SET batches_committed = $2, rows_committed = $3
+		WHERE id = $1 AND status IN ('running','uncertain')`, id, batches, rows)
+	return err
+}
+
+// MarkPartial stops a batch job that committed some batches but did not finish.
+// The lock stays held (holds_lock is untouched) so no other migration can run on
+// this database until the job is resumed.
+func (s *Store) MarkPartial(ctx context.Context, id, message, sqlstate string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE migration_jobs SET status = 'partial', worker_id = NULL, heartbeat_at = NULL,
+			last_error = $2, last_sqlstate = $3
+		WHERE id = $1 AND status IN ('running','uncertain')`,
+		id, message, nullIfEmpty(sqlstate))
+	return err
+}
+
+// Resume puts a partial job back in the queue. The worker continues from the
+// last checkpoint and does not repeat committed batches. The attempt counter
+// starts again so the resumed run gets a full retry budget.
+func (s *Store) Resume(ctx context.Context, id string) (Job, error) {
+	job, err := scanJob(s.db.QueryRowContext(ctx, `
+		UPDATE migration_jobs SET status = 'pending', attempt = 0, run_after = now(),
+			worker_id = NULL, heartbeat_at = NULL, last_error = NULL, last_sqlstate = NULL
+		WHERE id = $1 AND status = 'partial'
+		RETURNING `+jobColumns, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, ErrNotResumable
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("resume job: %w", err)
+	}
+	return job, nil
+}
+
 // ReapStale moves running jobs whose heartbeat stopped to 'uncertain'.
 func (s *Store) ReapStale(ctx context.Context, staleAfter time.Duration) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
@@ -348,6 +426,13 @@ CREATE TABLE IF NOT EXISTS migration_jobs (
     started_at    TIMESTAMPTZ,
     finished_at   TIMESTAMPTZ
 );
+
+-- Batch mode columns (added with ALTER so existing databases are upgraded too).
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_size INT;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batches_committed INT NOT NULL DEFAULT 0;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS rows_committed BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_table TEXT;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_column TEXT;
 
 -- At most one job per database may hold the lock (across workers and across batches).
 CREATE UNIQUE INDEX IF NOT EXISTS one_lock_per_db ON migration_jobs(database_id) WHERE holds_lock;
