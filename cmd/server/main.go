@@ -121,9 +121,9 @@ func main() {
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	http.HandleFunc("/", index)
-	http.HandleFunc("/login", index)
-	http.HandleFunc("/logout", index)
 
+	http.HandleFunc("/api/auth/login", authHandlerAPI.HandleLogin)
+	http.HandleFunc("/api/auth/logout", authHandlerAPI.HandleLogout)
 	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
 	http.HandleFunc("/api/auth/validate-session", authHandlerAPI.ValidateSession)
 	http.HandleFunc("/api/auth/refresh-login", authHandlerAPI.RefreshLoginCsrfToken)

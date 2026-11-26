@@ -19,6 +19,11 @@ type apiStringResponse struct {
 	Message string `json:"message"`
 }
 
+type apiLoginResponse struct {
+	Role      string `json:"role"`
+	CSRFToken string `json:"crsfToken"`
+}
+
 type apiValidateSessionResponse struct {
 	Valid bool `json:"valid"`
 }
@@ -36,7 +41,7 @@ func NewAuthHandlerAPI(db *sql.DB, sessionStore *SessionStore) *AuthHandlerAPI {
 }
 
 // "api/auth/login"
-func (h *AuthHandlerAPI) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandlerAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -67,7 +72,7 @@ func (h *AuthHandlerAPI) HandleLoginSubmit(w http.ResponseWriter, r *http.Reques
 	err = h.db.QueryRow(query, req.Username).Scan(&userID, &passwordHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			renderLoginWithError(w, formToken, "Invalid username or password")
+			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 			return
 		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -76,14 +81,14 @@ func (h *AuthHandlerAPI) HandleLoginSubmit(w http.ResponseWriter, r *http.Reques
 
 	// Verifikasi password
 	if !password.VerifyPasswordHash(req.Password, passwordHash) {
-		renderLoginWithError(w, formToken, "Invalid username or password")
+		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
 
 	// Pembuatan session
 	sess, err := h.sessionStore.CreateSession(userID)
 	if err != nil {
-		renderLoginWithError(w, formToken, err.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -104,7 +109,12 @@ func (h *AuthHandlerAPI) HandleLoginSubmit(w http.ResponseWriter, r *http.Reques
 		MaxAge: -1,
 	})
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(web.BaseData{
+		Name:      sess.Name,
+		Role:      sess.Role,
+		CSRFToken: sess.CSRFToken,
+	})
 }
 
 func (h *AuthHandlerAPI) RefreshLoginCsrfToken(w http.ResponseWriter, r *http.Request) {
@@ -132,28 +142,14 @@ func (h *AuthHandlerAPI) RefreshLoginCsrfToken(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(web.LoginData{
-		BaseData: web.BaseData{
-			Name: "Guest",
-			Role: "Guest",
-			CSRFToken: token,
-		},
+	json.NewEncoder(w).Encode(web.BaseData{
+		Name:      "Guest",
+		Role:      "Guest",
+		CSRFToken: token,
 	})
 }
 
-func (h *AuthHandlerAPI) renderLoginWithError(w http.ResponseWriter, csrf_token string, err string) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(web.LoginData{
-		BaseData: web.BaseData{
-			Name:  "",
-			Role:  "Guest",
-			Error: err,
-			CSRFToken: csrf_token,
-		},
-	})
-}
-
-func (h *AuthHandlerAPI) GetNameAndRole(w http.ResponseWriter, r *http.Request) {	
+func (h *AuthHandlerAPI) GetNameAndRole(w http.ResponseWriter, r *http.Request) {
 	name := "Guest"
 	role := "Guest"
 	cookie, err := r.Cookie("session_id")
@@ -175,7 +171,7 @@ func (h *AuthHandlerAPI) GetNameAndRole(w http.ResponseWriter, r *http.Request) 
 
 func (h *AuthHandlerAPI) ValidateSession(w http.ResponseWriter, r *http.Request) {
 	sessionValid := false
-	
+
 	cookie, err := r.Cookie("session_id")
 	if err == nil && cookie != nil {
 		session, err := h.sessionStore.GetSession(cookie.Value)
