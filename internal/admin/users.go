@@ -2,7 +2,7 @@ package admin
 
 import (
 	"database/sql"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -136,7 +136,7 @@ func HandleAddUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	if username != "" && password != "" {
 		if err := AddUser(db, username, name, password, role, groups); err != nil {
-			log.Printf("Error adding user: %v", err)
+			slog.ErrorContext(r.Context(), "admin.user_add_failed", "error", err)
 		}
 	}
 
@@ -153,7 +153,7 @@ func HandleDeleteUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteUser(db, id); err != nil {
-			log.Printf("Error deleting user: %v", err)
+			slog.ErrorContext(r.Context(), "admin.user_delete_failed", "error", err)
 		}
 	}
 

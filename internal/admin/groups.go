@@ -2,7 +2,7 @@ package admin
 
 import (
 	"database/sql"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -103,7 +103,7 @@ func HandleAddGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name != "" {
 		if err := AddGroup(db, name); err != nil {
-			log.Printf("Error adding group: %v", err)
+			slog.ErrorContext(r.Context(), "admin.group_add_failed", "error", err)
 		}
 	}
 
@@ -120,7 +120,7 @@ func HandleDeleteGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteGroup(db, id); err != nil {
-			log.Printf("Error deleting group: %v", err)
+			slog.ErrorContext(r.Context(), "admin.group_delete_failed", "error", err)
 		}
 	}
 
@@ -142,7 +142,7 @@ func HandleGrantPermission(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	if err1 == nil && err2 == nil && (accessLevel == "view" || accessLevel == "edit") {
 		if err := GrantPermission(db, groupID, databaseID, accessLevel); err != nil {
-			log.Printf("Error granting permission: %v", err)
+			slog.ErrorContext(r.Context(), "admin.permission_grant_failed", "error", err)
 		}
 	}
 
@@ -159,7 +159,7 @@ func HandleDeletePermission(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeletePermission(db, id); err != nil {
-			log.Printf("Error deleting permission: %v", err)
+			slog.ErrorContext(r.Context(), "admin.permission_delete_failed", "error", err)
 		}
 	}
 

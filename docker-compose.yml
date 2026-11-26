@@ -42,7 +42,7 @@ services:
       POSTGRES_PASSWORD: ${DBSAMPLES_PASSWORD:-postgres}
       POSTGRES_DB: ${DBSAMPLES_DB:-dbsamples}
     ports:
-      - "5434:5433"
+      - "5434:5432"
     volumes:
       - samplesdata:/var/lib/postgresql/data
       - ./db/sample:/sample:ro
@@ -61,6 +61,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-host=dbplatform port=5432 dbname=dbplatform user=postgres password=postgres sslmode=disable}
       ADDR: ${ADDR:-:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
     ports:
       - "${APP_PORT:-8080}:8080"
     depends_on:
@@ -69,4 +71,5 @@ services:
 
 volumes:
   pgdata:
-  samplesdata:
+  samplesdata1:
+  samplesdata2:

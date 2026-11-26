@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -130,7 +130,7 @@ func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 
 	if isPlatformDB(database) {
-		log.Printf("Blocked attempt to register platform database %q as managed connection", database)
+		slog.WarnContext(r.Context(), "admin.connection_blocked", "database", database)
 		http.Redirect(w, r, "/admin?error=Cannot+register+the+platform's+internal+database+as+a+managed+connection#connections", http.StatusSeeOther)
 		return
 	}
@@ -142,7 +142,7 @@ func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	if database != "" && host != "" && user != "" {
 		if err := AddConnection(db, database, host, port, user, password); err != nil {
-			log.Printf("Error adding connection: %v", err)
+			slog.ErrorContext(r.Context(), "admin.connection_add_failed", "error", err)
 			http.Redirect(w, r, "/admin?error="+url.QueryEscape(err.Error())+"#connections", http.StatusSeeOther)
 			return
 		}
@@ -161,7 +161,7 @@ func HandleDeleteConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteConnection(db, id); err != nil {
-			log.Printf("Error deleting connection: %v", err)
+			slog.ErrorContext(r.Context(), "admin.connection_delete_failed", "error", err)
 		}
 	}
 

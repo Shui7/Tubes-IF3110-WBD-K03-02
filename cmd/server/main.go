@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +18,9 @@ import (
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/authz"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var platformDB *sql.DB
@@ -43,6 +46,19 @@ func loadEnv(filename string) {
 
 func main() {
 	loadEnv(".env")
+
+	ctx := context.Background()
+	logger := observability.SetupLogger(observability.LoggerConfig{Service: "app"})
+	shutdownTracing, err := observability.SetupTracing(ctx, observability.TracingConfig{
+		ServiceName: "app",
+		Insecure:    true, // only used when OTEL_EXPORTER=otlp
+	})
+	if err != nil {
+		logger.ErrorContext(ctx, "tracing.setup_failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	staticDir := "/app/static"
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		staticDir = "internal/web/static"
@@ -52,13 +68,13 @@ func main() {
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		db, err := dbplatform.InitPlatformDB(dbURL)
 		if err != nil {
-			log.Printf("Database initialization failed: %v", err)
+			slog.Error("platformdb.init_failed", "error", err)
 		} else {
 			platformDB = db
-			log.Println("Database initialized successfully")
+			slog.Info("platformdb.initialized")
 		}
 	} else {
-		log.Println("DATABASE_URL is empty")
+		slog.Error("config.missing_database_url")
 		return
 	}
 
@@ -105,9 +121,15 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("Listening at http://localhost%s\n", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: otelhttp.NewHandler(http.DefaultServeMux, "http.server"),
+	}
+	slog.InfoContext(ctx, "server.listening", "addr", addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.ErrorContext(ctx, "server.failed", "error", err)
+		_ = shutdownTracing(ctx) // os.Exit skips defers, so flush spans explicitly
+		os.Exit(1)
 	}
 }
 
@@ -161,16 +183,16 @@ func adminPage(w http.ResponseWriter, r *http.Request) {
 	if platformDB != nil {
 		var err error
 		if data.Connections, err = admin.GetConnections(platformDB); err != nil {
-			log.Printf("GetConnections error: %v", err)
+			slog.ErrorContext(r.Context(), "admin.load_failed", "resource", "connections", "error", err)
 		}
 		if data.Groups, err = admin.GetGroups(platformDB); err != nil {
-			log.Printf("GetGroups error: %v", err)
+			slog.ErrorContext(r.Context(), "admin.load_failed", "resource", "groups", "error", err)
 		}
 		if data.Users, err = admin.GetUsers(platformDB); err != nil {
-			log.Printf("GetUsers error: %v", err)
+			slog.ErrorContext(r.Context(), "admin.load_failed", "resource", "users", "error", err)
 		}
 		if data.Permissions, err = admin.GetPermissions(platformDB); err != nil {
-			log.Printf("GetPermissions error: %v", err)
+			slog.ErrorContext(r.Context(), "admin.load_failed", "resource", "permissions", "error", err)
 		}
 	}
 	web.RenderTemplate(w, "admin.html", data)
@@ -309,7 +331,7 @@ func renderDatabaseDetail(id int, accessLevel string, w http.ResponseWriter, r *
 	for _, detail := range details {
 		count, countErr := manager.CountRows(r.Context(), detail.Schema, detail.Name)
 		if countErr != nil {
-			log.Printf("Count rows for %s.%s: %v", detail.Schema, detail.Name, countErr)
+			slog.WarnContext(r.Context(), "db.count_rows_failed", "table", detail.Schema+"."+detail.Name, "error", countErr)
 		}
 		data.Tables = append(data.Tables, web.TableSummary{Name: detail.Name, RowCount: count})
 		if detail.Name == table {

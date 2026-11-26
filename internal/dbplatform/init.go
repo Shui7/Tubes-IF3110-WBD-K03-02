@@ -3,7 +3,7 @@ package dbplatform
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/password"
 	_ "github.com/lib/pq"
@@ -137,7 +137,7 @@ func InitPlatformDB(connStr string) (*sql.DB, error) {
 
 	for _, stmt := range migrations {
 		if _, err := db.Exec(stmt); err != nil {
-			log.Printf("schema migration notice: %v", err)
+			slog.Warn("platformdb.schema_notice", "error", err)
 		}
 	}
 
