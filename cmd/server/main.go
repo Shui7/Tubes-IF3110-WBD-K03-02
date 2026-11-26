@@ -88,10 +88,6 @@ func main() {
 		return authMiddleware.RequireAuth(authMiddleware.RequireRole("Admin", next))
 	}
 
-	// http.Handle("/", authMiddleware.RequireAuth(http.HandlerFunc(home)))
-	// http.HandleFunc("/login", authHandler.HandleLogin)
-	// http.HandleFunc("/logout", logout)
-	// http.HandleFunc("/unauthorized", unauthorizedPage)
 	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
 	http.Handle("/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddConnection(platformDB, w, r)
@@ -121,7 +117,6 @@ func main() {
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	http.HandleFunc("/", index)
-
 	http.HandleFunc("/api/auth/login", authHandlerAPI.HandleLogin)
 	http.HandleFunc("/api/auth/logout", authHandlerAPI.HandleLogout)
 	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
