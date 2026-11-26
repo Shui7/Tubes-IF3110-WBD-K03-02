@@ -135,8 +135,8 @@ func loginAsGuest(w http.ResponseWriter, r *http.Request) {
 		BaseData: web.BaseData{
 			Name: "Guest",
 			Role: "Guest",
+			CSRFToken: token,
 		},
-		CSRFToken: token,
 	})
 }
 
@@ -146,8 +146,8 @@ func renderLoginWithError(w http.ResponseWriter, csrf_token string, err string) 
 			Name:  "",
 			Role:  "Guest",
 			Error: err,
+			CSRFToken: csrf_token,
 		},
-		CSRFToken: csrf_token,
 	})
 }
 

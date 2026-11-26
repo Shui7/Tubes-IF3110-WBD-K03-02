@@ -7,119 +7,118 @@ import (
 )
 
 type BaseData struct {
-	Name      string
-	Role      string
-	Error     string
-	Success   string
-	CSRFToken string
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	Error     string `json:"error"`
+	Success   string `json:"success"`
+	CSRFToken string `json:"csrfToken"`
 }
 
 type DatabaseItem struct {
-	ID          int
-	Name        string
-	AccessLevel string // "view" or "edit"
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	AccessLevel string `json:"accessLevel"` // "view" or "edit"
 }
 
 type DatabasesData struct {
 	BaseData
-	Databases []DatabaseItem
+	Databases []DatabaseItem `json:"databases"`
 }
 
 type LoginData struct {
 	BaseData
-	Username  string
-	CSRFToken string
+	Username string `json:"username"`
 }
 
 type DBConnectionItem struct {
-	ID       int
-	Database string
-	Host     string
-	Port     int
-	User     string
-	Status   string // "Connected", "Failed"
+	ID       int    `json:"id"`
+	Database string `json:"database"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Status   string `json:"status"` // "Connected", "Failed"
 }
 
 type GroupItem struct {
-	ID          int
-	Name        string
-	MemberCount int
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	MemberCount int    `json:"memberCount"`
 }
 
 type UserItem struct {
-	ID       int
-	Username string
-	Name     string
-	Role     string // "Admin", "User"
-	Groups   []string
+	ID       int      `json:"id"`
+	Username string   `json:"username"`
+	Name     string   `json:"name"`
+	Role     string   `json:"role"` // "Admin", "User"
+	Groups   []string `json:"groups"`
 }
 
 type GroupPermissionItem struct {
-	ID           int
-	GroupID      int
-	GroupName    string
-	DatabaseID   int
-	DatabaseName string
-	AccessLevel  string // "view" or "edit"
+	ID           int    `json:"id"`
+	GroupID      int    `json:"groupId"`
+	GroupName    string `json:"groupName"`
+	DatabaseID   int    `json:"databaseId"`
+	DatabaseName string `json:"databaseName"`
+	AccessLevel  string `json:"accessLevel"` // "view" or "edit"
 }
 
 type AdminData struct {
 	BaseData
-	ActiveTab   string
-	Connections []DBConnectionItem
-	Groups      []GroupItem
-	Users       []UserItem
-	Permissions []GroupPermissionItem
+	ActiveTab   string                `json:"activeTab"`
+	Connections []DBConnectionItem    `json:"connections"`
+	Groups      []GroupItem           `json:"groups"`
+	Users       []UserItem            `json:"users"`
+	Permissions []GroupPermissionItem `json:"permissions"`
 }
 
 type ColumnItem struct {
-	Name     string
-	Type     string
-	Nullable bool
-	Default  string
-	IsPK     bool
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable bool   `json:"nullable"`
+	Default  string `json:"default"`
+	IsPK     bool   `json:"isPk"`
 }
 
 type ConstraintItem struct {
-	Name       string
-	Type       string
-	Definition string
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Definition string `json:"definition"`
 }
 
 type IndexItem struct {
-	Name    string
-	Columns string
-	Type    string
-	Unique  bool
+	Name    string `json:"name"`
+	Columns string `json:"columns"`
+	Type    string `json:"type"`
+	Unique  bool   `json:"unique"`
 }
 
 type TableSummary struct {
-	Name     string
-	RowCount int64
+	Name     string `json:"name"`
+	RowCount int64  `json:"rowCount"`
 }
 
 type MigrationHistoryItem struct {
-	Version    string
-	Name       string
-	ExecutedBy string
-	ExecutedAt string
-	Status     string
-	SQL        string
+	Version    string `json:"version"`
+	Name       string `json:"name"`
+	ExecutedBy string `json:"executedBy"`
+	ExecutedAt string `json:"executedAt"`
+	Status     string `json:"status"`
+	SQL        string `json:"sql"`
 }
 
 type DatabaseDetailData struct {
 	BaseData
-	Database      DatabaseItem
-	Tables        []TableSummary
-	SelectedTable string
-	Columns       []ColumnItem
-	Constraints   []ConstraintItem
-	Indexes       []IndexItem
-	DataHeaders   []string
-	DataRows      [][]string
-	Migrations    []MigrationHistoryItem
-	ActiveTab     string
-	Error         string
+	Database      DatabaseItem           `json:"database"`
+	Tables        []TableSummary         `json:"tables"`
+	SelectedTable string                 `json:"selectedTable"`
+	Columns       []ColumnItem           `json:"columns"`
+	Constraints   []ConstraintItem       `json:"constraints"`
+	Indexes       []IndexItem            `json:"indexes"`
+	DataHeaders   []string               `json:"dataHeaders"`
+	DataRows      [][]string             `json:"dataRows"`
+	Migrations    []MigrationHistoryItem `json:"migrations"`
+	ActiveTab     string                 `json:"activeTab"`
+	Error         string                 `json:"error"`
 }
 
 //go:embed templates/*.html
