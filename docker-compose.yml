@@ -71,5 +71,5 @@ services:
 
 volumes:
   pgdata:
-  samplesdata1:
+  samplesdata:
   samplesdata2:
