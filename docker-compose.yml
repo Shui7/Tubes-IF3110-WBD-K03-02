@@ -44,7 +44,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - samplesdata:/var/lib/postgresql/data
+      - samplesdata2:/var/lib/postgresql/data
       - ./db/sample:/sample:ro
       - ./db/init-samples.sh:/docker-entrypoint-initdb.d/init-samples.sh:ro
     healthcheck:
@@ -71,5 +71,5 @@ services:
 
 volumes:
   pgdata:
-  samplesdata1:
+  samplesdata:
   samplesdata2:
