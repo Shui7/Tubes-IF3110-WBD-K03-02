@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ $.CSRFToken }}">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Platform Administration | Database Management Platform</title>
+</head>
+
+<body>
+    <header id="navbar" class="navbar">
+        <a class="brand" href="/">DBManagementPlatform</a>
+        <nav id="nav-links" class="nav-links">
+            <a href="/">Home</a>
+            <a href="/databases">Databases</a>
+            {{ if eq .Role "Admin" }}
+            <a id="nav-link-admin" href="/admin" class="active">Admin</a>
+            {{ end }}
+        </nav>
+        <div class="nav-right">
+            <span class="muted mono">{{ .Name }} ({{ .Role }})</span>
+            <form method="POST" action="/logout">
+                <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                <button type="submit" class="btn btn-danger btn-sm">Logout</button>
+            </form>
+        </div>
+    </header>
+    
+    <main id="content">
+    </main>
+
+    <footer>
+        <p>For Tugas Besar IF3110 Web Application Development</p>
+        <p>By K03-02:</p>
+        <ul>
+            <li>13524003 Faiq Azzam Nafidz</li>
+            <li>13524018 Muhammad Nafis Habibi</li>
+            <li>13524072 I Gusti Ngurah Alit Dharma Y</li>
+        </ul>
+    </footer>
+
+    <script type="module" src="/static/js/app.js"> </script>
+</body>
+
+</html>

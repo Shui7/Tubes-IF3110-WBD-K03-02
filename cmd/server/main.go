@@ -24,6 +24,8 @@ import (
 )
 
 var platformDB *sql.DB
+var sessionStore *auth.SessionStore
+var authHandlerAPI *auth.AuthHandlerAPI
 var authHandler *auth.AuthHandler
 var authMiddleware *auth.AuthMiddleware
 
@@ -78,17 +80,18 @@ func main() {
 		return
 	}
 
-	sessionStore := auth.NewSessionStore(platformDB, 1*time.Hour, 24*time.Hour, 5*time.Minute)
+	sessionStore = auth.NewSessionStore(platformDB, 1*time.Hour, 24*time.Hour, 5*time.Minute)
 	authHandler = auth.NewAuthHandler(platformDB, sessionStore)
+	authHandlerAPI = auth.NewAuthHandlerAPI(platformDB, sessionStore)
 	authMiddleware = auth.NewAuthMiddleware(sessionStore)
 	adminOnly := func(next http.Handler) http.Handler {
 		return authMiddleware.RequireAuth(authMiddleware.RequireRole("Admin", next))
 	}
 
-	http.Handle("/", authMiddleware.RequireAuth(http.HandlerFunc(home)))
-	http.HandleFunc("/login", authHandler.HandleLogin)
-	http.HandleFunc("/logout", logout)
-	http.HandleFunc("/unauthorized", unauthorizedPage)
+	// http.Handle("/", authMiddleware.RequireAuth(http.HandlerFunc(home)))
+	// http.HandleFunc("/login", authHandler.HandleLogin)
+	// http.HandleFunc("/logout", logout)
+	// http.HandleFunc("/unauthorized", unauthorizedPage)
 	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
 	http.Handle("/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleAddConnection(platformDB, w, r)
@@ -117,6 +120,14 @@ func main() {
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
+	http.HandleFunc("/", index)
+	http.HandleFunc("/login", index)
+	http.HandleFunc("/logout", index)
+
+	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
+	http.HandleFunc("/api/auth/validate-session", authHandlerAPI.ValidateSession)
+	http.HandleFunc("/api/auth/refresh-login", authHandlerAPI.RefreshLoginCsrfToken)
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -131,6 +142,24 @@ func main() {
 		_ = shutdownTracing(ctx) // os.Exit skips defers, so flush spans explicitly
 		os.Exit(1)
 	}
+}
+
+func index(w http.ResponseWriter, r *http.Request) {
+	csrfToken := ""
+	cookie, err := r.Cookie("session_id")
+	if err == nil && cookie != nil {
+		session, err := sessionStore.GetSession(cookie.Value)
+		if err != nil {
+			_ = sessionStore.TouchSession(session.ID)
+			csrfToken = session.CSRFToken
+		}
+	}
+	web.RenderTemplate(w, "index.html", web.BaseData{
+		Name:      "Guest",
+		Role:      "Guest",
+		CSRFToken: csrfToken,
+	})
+
 }
 
 func unauthorizedPage(w http.ResponseWriter, r *http.Request) {

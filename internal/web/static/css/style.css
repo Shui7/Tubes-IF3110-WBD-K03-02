@@ -96,7 +96,7 @@ main {
     margin: 0 auto;
     padding: 2rem 1.5rem 3rem;
 }
-main.narrow { max-width: 440px; }
+.narrow { max-width: 440px; }
 
 .page-header {
     display: flex;
