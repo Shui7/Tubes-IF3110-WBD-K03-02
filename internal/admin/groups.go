@@ -12,10 +12,11 @@ import (
 
 func GetGroups(db *sql.DB) ([]web.GroupItem, error) {
 	rows, err := db.Query(`
-		SELECT g.id, g.name, COUNT(ug.user_id) AS member_count
+		SELECT g.id, g.name, COUNT(ug.user_id) AS member_count, COALESCE(g.leader_user_id, 0), COALESCE(NULLIF(u.name, ''), u.username, '')
 		FROM groups g
 		LEFT JOIN user_groups ug ON g.id = ug.group_id
-		GROUP BY g.id, g.name
+		LEFT JOIN users u ON u.id = g.leader_user_id
+		GROUP BY g.id, g.name, g.leader_user_id, u.name, u.username
 		ORDER BY g.id ASC
 	`)
 	if err != nil {
@@ -26,12 +27,33 @@ func GetGroups(db *sql.DB) ([]web.GroupItem, error) {
 	var groups []web.GroupItem
 	for rows.Next() {
 		var g web.GroupItem
-		if err := rows.Scan(&g.ID, &g.Name, &g.MemberCount); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.MemberCount, &g.LeaderID, &g.LeaderName); err != nil {
 			return nil, err
 		}
 		groups = append(groups, g)
 	}
 	return groups, rows.Err()
+}
+
+func SetGroupLeader(db *sql.DB, groupID, userID int) error {
+	if userID == 0 {
+		_, err := db.Exec(`UPDATE groups SET leader_user_id=NULL WHERE id=$1`, groupID)
+		return err
+	}
+	result, err := db.Exec(`
+		UPDATE groups SET leader_user_id=$1
+		WHERE id=$2 AND EXISTS (SELECT 1 FROM user_groups WHERE group_id=$2 AND user_id=$1)`, userID, groupID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func AddGroup(db *sql.DB, name string) error {
@@ -124,6 +146,21 @@ func HandleDeleteGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+}
+
+func HandleSetGroupLeader(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+		return
+	}
+	groupID, groupErr := strconv.Atoi(r.FormValue("group_id"))
+	userID, userErr := strconv.Atoi(r.FormValue("leader_user_id"))
+	if groupErr == nil && userErr == nil {
+		if err := SetGroupLeader(db, groupID, userID); err != nil {
+			slog.ErrorContext(r.Context(), "admin.group_leader_update_failed", "group_id", groupID, "leader_user_id", userID, "error", err)
+		}
+	}
 	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
 }
 

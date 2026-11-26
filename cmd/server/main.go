@@ -20,6 +20,7 @@ import (
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -101,6 +102,9 @@ func main() {
 	})))
 	http.Handle("/admin/groups/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteGroup(platformDB, w, r)
+	})))
+	http.Handle("/admin/groups/leader", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleSetGroupLeader(platformDB, w, r)
 	})))
 	http.Handle("/admin/permissions/grant", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGrantPermission(platformDB, w, r)
@@ -222,8 +226,18 @@ func databases(w http.ResponseWriter, r *http.Request) {
 	if len(parts) >= 2 && parts[1] == "migrations" {
 		// Only View+Edit users may execute migrations (POST). View-only users can still
 		// reach this route via GET (which just redirects back to the detail page).
-		if r.Method == http.MethodPost && level != authz.AccessEdit {
+		isApprovalDecision := len(parts) == 5 && parts[2] == "requests" && parts[4] == "decision"
+		if r.Method == http.MethodPost && level != authz.AccessEdit && !isApprovalDecision {
 			http.Error(w, "Forbidden: edit access required to execute migrations", http.StatusForbidden)
+			return
+		}
+		if isApprovalDecision {
+			requestID, parseErr := strconv.ParseInt(parts[3], 10, 64)
+			if parseErr != nil {
+				http.NotFound(w, r)
+				return
+			}
+			handleMigrationDecision(id, requestID, w, r)
 			return
 		}
 		if len(parts) > 3 || (len(parts) == 3 && parts[2] != "rollback" && parts[2] != "forward") {
@@ -365,6 +379,15 @@ func renderDatabaseDetail(id int, accessLevel string, w http.ResponseWriter, r *
 		return
 	}
 	data.Migrations = convertMigrations(migrations)
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if platformDB != nil && sess != nil {
+		requests, requestErr := workflow.ListRequests(platformDB, id, sess.UserID)
+		if requestErr != nil {
+			slog.ErrorContext(r.Context(), "migration.requests_load_failed", "database_id", id, "error", requestErr)
+		} else {
+			data.ChangeRequests = convertChangeRequests(requests)
+		}
+	}
 	web.RenderTemplate(w, "databasedetail.html", data)
 }
 
@@ -380,39 +403,186 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(id), http.StatusSeeOther)
 		return
 	}
-	manager, _, err := openManagedDatabase(r.Context(), id)
+	session, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if session == nil || platformDB == nil {
+		http.Error(w, "Unable to create migration request", http.StatusInternalServerError)
+		return
+	}
+	action := operation
+	if action == "" {
+		action = "up"
+	}
+	var sqlUp, sqlDown, reason string
+	var irreversible bool
+	var targetID int64
+	if action == "up" {
+		sqlUp, sqlDown = r.FormValue("sql_up"), r.FormValue("sql_down")
+		irreversible, reason = r.FormValue("irreversible") == "on", r.FormValue("irreversible_reason")
+	} else {
+		var parseErr error
+		targetID, parseErr = strconv.ParseInt(r.FormValue("execution_id"), 10, 64)
+		if parseErr != nil {
+			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape("invalid target execution ID")+"#migrations", http.StatusSeeOther)
+			return
+		}
+		manager, _, openErr := openManagedDatabase(r.Context(), id)
+		if openErr != nil {
+			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(openErr.Error())+"#migrations", http.StatusSeeOther)
+			return
+		}
+		target, loadErr := manager.GetMigrationExecution(r.Context(), targetID)
+		_ = manager.Close()
+		if loadErr != nil {
+			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(loadErr.Error())+"#migrations", http.StatusSeeOther)
+			return
+		}
+		sqlUp, sqlDown = target.SQL, target.SQLDown
+	}
+	request, err := workflow.CreateRequest(platformDB, id, session.UserID, session.Name, action, sqlUp, sqlDown, irreversible, reason, targetID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "migration.request_rejected", "database_id", id, "action", action, "user_id", session.UserID, "error", err)
+		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+		return
+	}
+	slog.InfoContext(r.Context(), "migration.requested", "request_id", request.ID, "database_id", id, "action", action, "user_id", session.UserID, "user", session.Name, "target_execution_id", targetID)
+	message := fmt.Sprintf("Migration change request #%d submitted for group leader approval.", request.ID)
+	http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || platformDB == nil {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if session == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	request, err := workflow.GetRequest(platformDB, requestID)
+	if err == nil && request.DatabaseID != databaseID {
+		err = sql.ErrNoRows
+	}
+	decision := r.FormValue("decision")
+	allApproved := false
+	rejected := false
 	if err == nil {
-		defer manager.Close()
-		switch operation {
-		case "rollback", "forward":
-			targetID, parseErr := strconv.ParseInt(r.FormValue("execution_id"), 10, 64)
-			err = parseErr
-			if err == nil && operation == "rollback" {
-				err = manager.RollbackMigration(r.Context(), targetID, currentUser(r).Name)
-			} else if err == nil {
-				err = manager.ForwardMigration(r.Context(), targetID, currentUser(r).Name)
-			}
-		default:
-			version, versionErr := manager.NextMigrationVersion(r.Context())
-			err = versionErr
-			if err == nil {
-				irreversible := r.FormValue("irreversible") == "on"
-				err = manager.ExecuteMigrationDefinition(r.Context(), version, r.FormValue("sql_up"), r.FormValue("sql_down"), irreversible, r.FormValue("irreversible_reason"), currentUser(r).Name)
+		var ready, wasRejected bool
+		ready, wasRejected, err = workflow.Respond(platformDB, requestID, session.UserID, session.Name, decision, r.FormValue("comment"))
+		allApproved = ready
+		rejected = wasRejected
+		if err == nil {
+			slog.InfoContext(r.Context(), "migration.approval_decided", "request_id", requestID, "database_id", databaseID, "decision", decision, "user_id", session.UserID, "user", session.Name)
+			if rejected {
+				slog.WarnContext(r.Context(), "migration.request_rejected_by_leader", "request_id", requestID, "database_id", databaseID, "approver_user_id", session.UserID)
+			} else if ready {
+				err = executeApprovedMigration(r.Context(), request, session.UserID, session.Name)
 			}
 		}
 	}
 	if err != nil {
-		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+		http.Redirect(w, r, "/databases/"+strconv.Itoa(databaseID)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
-	message := "Migration " + operation + " executed successfully."
-	if operation == "" {
-		message = "Migration executed successfully."
+	message := "Approval recorded. The request is waiting for the remaining group leaders."
+	if rejected {
+		message = "Migration change request rejected."
+	} else if allApproved {
+		message = "All required leaders approved the request; execution finished."
 	}
-	if name := strings.TrimSpace(r.FormValue("name")); name != "" {
-		message = name + " executed successfully."
+	http.Redirect(w, r, "/databases/"+strconv.Itoa(databaseID)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func convertChangeRequests(requests []workflow.Request) []web.MigrationChangeRequestItem {
+	items := make([]web.MigrationChangeRequestItem, 0, len(requests))
+	for _, request := range requests {
+		createdAt := request.CreatedAt.Format(time.RFC3339)
+		targetID := int64(0)
+		if request.TargetExecutionID.Valid {
+			targetID = request.TargetExecutionID.Int64
+		}
+		item := web.MigrationChangeRequestItem{
+			ID: request.ID, Action: request.Action, RequesterName: request.RequesterName, Status: request.Status,
+			TargetExecutionID: targetID, SQLUp: request.SQLUp, SQLDown: request.SQLDown,
+			Irreversible: request.Irreversible, IrreversibleReason: request.IrreversibleReason,
+			Error: nullStringValue(request.Error), CreatedAt: createdAt,
+		}
+		for _, approval := range request.Approvals {
+			item.Approvals = append(item.Approvals, web.MigrationApprovalItem{
+				GroupName: approval.GroupName, LeaderName: approval.LeaderName, Decision: approval.Decision,
+				Comment: approval.Comment, CanRespond: approval.CanRespond,
+			})
+		}
+		for _, event := range request.Events {
+			item.Events = append(item.Events, web.MigrationWorkflowEventItem{
+				Status: event.Status, ActorName: event.ActorName, Note: event.Note,
+				OccurredAt: event.OccurredAt.Format(time.RFC3339),
+			})
+		}
+		items = append(items, item)
 	}
-	http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+	return items
+}
+
+func executeApprovedMigration(ctx context.Context, request workflow.Request, approverID int, approverName string) error {
+	if err := workflow.SetStatus(platformDB, request.ID, "pending_queue", approverID, approverName, "All required approvals received"); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "migration.pending_queue", "request_id", request.ID, "database_id", request.DatabaseID, "action", request.Action)
+	if err := workflow.SetStatus(platformDB, request.ID, "running", approverID, approverName, "Execution started"); err != nil {
+		return err
+	}
+	manager, _, err := openManagedDatabase(ctx, request.DatabaseID)
+	if err != nil {
+		_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+		sqlForRequest := request.SQLUp
+		if request.Action == "rollback" {
+			sqlForRequest = request.SQLDown
+		}
+		slog.ErrorContext(ctx, "migration.execution_failed", "request_id", request.ID, "database_id", request.DatabaseID, "action", request.Action, "user_id", approverID, "target_execution_id", request.TargetExecutionID, "sql", sqlForRequest, "error", err)
+		return err
+	}
+	defer manager.Close()
+
+	var sqlRun string
+	var version int64
+	if request.Action == "up" {
+		version, err = manager.NextMigrationVersion(ctx)
+		sqlRun = request.SQLUp
+	} else {
+		var target dbmanager.Migration
+		target, err = manager.GetMigrationExecution(ctx, request.TargetExecutionID.Int64)
+		if err == nil {
+			version = target.Version
+			if request.Action == "rollback" {
+				sqlRun = target.SQLDown
+			} else {
+				sqlRun = target.SQL
+			}
+		}
+	}
+	slog.InfoContext(ctx, "migration.execution_started", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun)
+	if err == nil {
+		switch request.Action {
+		case "up":
+			err = manager.ExecuteMigrationDefinition(ctx, version, request.SQLUp, request.SQLDown, request.Irreversible, request.IrreversibleReason, approverName)
+		case "rollback":
+			err = manager.RollbackMigration(ctx, request.TargetExecutionID.Int64, approverName)
+		case "forward":
+			err = manager.ForwardMigration(ctx, request.TargetExecutionID.Int64, approverName)
+		}
+	}
+	if err != nil {
+		_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+		slog.ErrorContext(ctx, "migration.execution_failed", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun, "error", err)
+		return err
+	}
+	slog.InfoContext(ctx, "migration.execution_succeeded", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun)
+	if err := workflow.SetStatus(platformDB, request.ID, "success", approverID, approverName, "Execution completed"); err != nil {
+		slog.ErrorContext(ctx, "migration.workflow_status_update_failed", "request_id", request.ID, "database_id", request.DatabaseID, "status", "success", "error", err)
+		return err
+	}
+	return nil
 }
 
 func convertColumns(columns []dbmanager.Column) []web.ColumnItem {

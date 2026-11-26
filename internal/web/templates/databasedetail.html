@@ -282,17 +282,63 @@
                 </table>
             </div>
 
+            <h3>Migration requests and approvals</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Request</th><th>Action</th><th>Requester</th><th>Status</th><th>Required approvals</th><th>Error</th></tr>
+                    </thead>
+                    <tbody>
+                        {{ if .ChangeRequests }}
+                        {{ range .ChangeRequests }}
+                        {{ $request := . }}
+                        <tr>
+                            <td class="mono">#{{ .ID }}<br><small>{{ .CreatedAt }}</small></td>
+                            <td>{{ .Action }}{{ if .TargetExecutionID }} #{{ .TargetExecutionID }}{{ end }}</td>
+                            <td>{{ .RequesterName }}</td>
+                            <td><span class="badge">{{ .Status }}</span></td>
+                            <td>
+                                {{ range .Approvals }}
+                                <div>{{ .GroupName }} — {{ .LeaderName }}: <strong>{{ .Decision }}</strong></div>
+                                {{ if .CanRespond }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/requests/{{ $request.ID }}/decision" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <button type="submit" class="btn btn-primary btn-sm" name="decision" value="approved">Approve</button>
+                                    <button type="submit" class="btn btn-danger btn-sm" name="decision" value="rejected">Reject</button>
+                                </form>
+                                {{ end }}
+                                {{ end }}
+                            </td>
+                            <td>{{ .Error }}</td>
+                        </tr>
+                        <tr><td colspan="6">
+                            <details><summary>Workflow history and request details</summary>
+                                <ol>
+                                    {{ range .Events }}<li><strong>{{ .Status }}</strong> — {{ .ActorName }} — {{ .OccurredAt }}: {{ .Note }}</li>{{ end }}
+                                </ol>
+                                {{ if eq $request.Action "up" }}
+                                <p><strong>SQL up</strong></p><pre class="mono">{{ $request.SQLUp }}</pre>
+                                {{ if $request.Irreversible }}<p><strong>Irreversible:</strong> {{ $request.IrreversibleReason }}</p>{{ else }}<p><strong>SQL down</strong></p><pre class="mono">{{ $request.SQLDown }}</pre>{{ end }}
+                                {{ else if eq $request.Action "rollback" }}
+                                <p><strong>SQL down to execute</strong></p><pre class="mono">{{ $request.SQLDown }}</pre>
+                                {{ else }}
+                                <p><strong>SQL up to execute</strong></p><pre class="mono">{{ $request.SQLUp }}</pre>
+                                {{ end }}
+                            </details>
+                        </td></tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr><td colspan="6" class="empty center">No migration change requests.</td></tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
             {{ if eq .Database.AccessLevel "edit" }}
             <div class="form-card mt-1">
-                <h3>Create Migration</h3>
+                <h3>Submit Migration for Approval</h3>
                 <form method="POST" action="/databases/{{ .Database.ID }}/migrations">
                     <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
-
-                    <div class="form-group">
-                        <label for="migration_name">Migration Name</label>
-                        <input type="text" id="migration_name" name="name" required
-                            placeholder="e.g. 002_add_discount_column">
-                    </div>
 
                     <div class="form-group">
                         <label for="migration_sql_up">SQL up</label>
@@ -311,12 +357,11 @@
                     </div>
                     <div class="form-group" id="irreversible-reason-group" hidden>
                         <label for="irreversible_reason">Reason</label>
-                        <textarea id="irreversible_reason" name="irreversible_reason" rows="3"
-                            placeholder="Explain why this migration cannot be safely reversed."></textarea>
+                        <textarea id="irreversible_reason" name="irreversible_reason" rows="3" placeholder="Explain why this migration cannot be safely reversed."></textarea>
                     </div>
 
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Execute Migration</button>
+                        <button type="submit" class="btn btn-primary">Submit for Approval</button>
                     </div>
                 </form>
             </div>

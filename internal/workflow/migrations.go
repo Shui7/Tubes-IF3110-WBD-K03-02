@@ -1,0 +1,334 @@
+package workflow
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+type Approval struct {
+	GroupID    int
+	GroupName  string
+	LeaderID   int
+	LeaderName string
+	Decision   string
+	Comment    string
+	CanRespond bool
+}
+
+type Request struct {
+	ID                 int64
+	DatabaseID         int
+	RequesterID        int
+	RequesterName      string
+	Action             string
+	SQLUp              string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	TargetExecutionID  sql.NullInt64
+	Status             string
+	Error              sql.NullString
+	CreatedAt          time.Time
+	Approvals          []Approval
+	Events             []Event
+}
+
+type Event struct {
+	Status     string
+	ActorName  string
+	Note       string
+	OccurredAt time.Time
+}
+
+func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, action, sqlUp, sqlDown string, irreversible bool, reason string, targetID int64) (Request, error) {
+	if databaseID < 1 || requesterID < 1 || strings.TrimSpace(requesterName) == "" {
+		return Request{}, errors.New("database and requester are required")
+	}
+	if action != "up" && action != "rollback" && action != "forward" {
+		return Request{}, errors.New("invalid migration action")
+	}
+	if action == "up" {
+		if strings.TrimSpace(sqlUp) == "" {
+			return Request{}, errors.New("SQL up is required")
+		}
+		if irreversible && strings.TrimSpace(reason) == "" {
+			return Request{}, errors.New("irreversible reason is required")
+		}
+		if !irreversible && strings.TrimSpace(sqlDown) == "" {
+			return Request{}, errors.New("SQL down is required unless marked irreversible")
+		}
+		if irreversible {
+			sqlDown = ""
+		} else {
+			reason = ""
+		}
+	} else if targetID < 1 {
+		return Request{}, errors.New("target execution ID must be positive")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return Request{}, fmt.Errorf("begin migration approval request: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT DISTINCT g.id, g.name, g.leader_user_id, COALESCE(NULLIF(u.name, ''), u.username, '')
+		FROM group_database_access gda
+		JOIN groups g ON g.id = gda.group_id
+		LEFT JOIN users u ON u.id = g.leader_user_id
+		WHERE COALESCE(gda.database_id, gda.db_id) = $1
+		ORDER BY g.id`, databaseID)
+	if err != nil {
+		return Request{}, fmt.Errorf("load database access groups: %w", err)
+	}
+	type requiredApproval struct {
+		groupID int
+		group   string
+		leader  sql.NullInt64
+		name    string
+	}
+	var required []requiredApproval
+	for rows.Next() {
+		var approval requiredApproval
+		if err := rows.Scan(&approval.groupID, &approval.group, &approval.leader, &approval.name); err != nil {
+			rows.Close()
+			return Request{}, fmt.Errorf("scan approval group: %w", err)
+		}
+		required = append(required, approval)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Request{}, fmt.Errorf("iterate approval groups: %w", err)
+	}
+	rows.Close()
+	if len(required) == 0 {
+		return Request{}, errors.New("database has no access groups; configure at least one group and leader before requesting a migration")
+	}
+	for _, approval := range required {
+		if !approval.leader.Valid {
+			return Request{}, fmt.Errorf("group %q does not have an assigned leader", approval.group)
+		}
+		if approval.name == "" {
+			return Request{}, fmt.Errorf("leader for group %q could not be found", approval.group)
+		}
+	}
+
+	var request Request
+	err = tx.QueryRow(`
+		INSERT INTO migration_change_requests
+			(database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, irreversible_reason, target_execution_id, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,0),'draft')
+		RETURNING id, database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at`,
+		databaseID, requesterID, requesterName, action, sqlUp, sqlDown, irreversible, reason, targetID,
+	).Scan(&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action, &request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason, &request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt)
+	if err != nil {
+		return Request{}, fmt.Errorf("create migration approval request: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE migration_change_requests SET status='pending_review', updated_at=NOW() WHERE id=$1`, request.ID); err != nil {
+		return Request{}, err
+	}
+	if err := insertEvent(tx, request.ID, "draft", requesterID, requesterName, "Request created"); err != nil {
+		return Request{}, err
+	}
+	if err := insertEvent(tx, request.ID, "pending_review", requesterID, requesterName, "Submitted for group leader approval"); err != nil {
+		return Request{}, err
+	}
+	for _, approval := range required {
+		if _, err := tx.Exec(`
+			INSERT INTO migration_change_approvals (request_id, group_id, group_name, leader_user_id, leader_name)
+			VALUES ($1,$2,$3,$4,$5)`, request.ID, approval.groupID, approval.group, approval.leader.Int64, approval.name); err != nil {
+			return Request{}, fmt.Errorf("create group approval: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Request{}, fmt.Errorf("commit migration approval request: %w", err)
+	}
+	request.Status = "pending_review"
+	return request, nil
+}
+
+func ListRequests(db *sql.DB, databaseID, userID int) ([]Request, error) {
+	rows, err := db.Query(`
+		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
+		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at
+		FROM migration_change_requests WHERE database_id=$1 ORDER BY id DESC`, databaseID)
+	if err != nil {
+		return nil, fmt.Errorf("list migration requests: %w", err)
+	}
+	defer rows.Close()
+	var requests []Request
+	for rows.Next() {
+		var request Request
+		if err := rows.Scan(&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName,
+			&request.Action, &request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason,
+			&request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan migration request: %w", err)
+		}
+		approvals, err := db.Query(`
+			SELECT group_id, group_name, leader_user_id, leader_name, decision, comment
+			FROM migration_change_approvals WHERE request_id=$1 ORDER BY group_id`, request.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list request approvals: %w", err)
+		}
+		for approvals.Next() {
+			var approval Approval
+			if err := approvals.Scan(&approval.GroupID, &approval.GroupName, &approval.LeaderID, &approval.LeaderName, &approval.Decision, &approval.Comment); err != nil {
+				approvals.Close()
+				return nil, fmt.Errorf("scan request approval: %w", err)
+			}
+			approval.CanRespond = request.Status == "pending_review" && approval.Decision == "pending" && approval.LeaderID == userID
+			request.Approvals = append(request.Approvals, approval)
+		}
+		if err := approvals.Err(); err != nil {
+			approvals.Close()
+			return nil, fmt.Errorf("iterate request approvals: %w", err)
+		}
+		approvals.Close()
+		events, err := db.Query(`SELECT status, actor_name, note, occurred_at FROM migration_change_events WHERE request_id=$1 ORDER BY id`, request.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list request workflow events: %w", err)
+		}
+		for events.Next() {
+			var event Event
+			if err := events.Scan(&event.Status, &event.ActorName, &event.Note, &event.OccurredAt); err != nil {
+				events.Close()
+				return nil, fmt.Errorf("scan request workflow event: %w", err)
+			}
+			request.Events = append(request.Events, event)
+		}
+		if err := events.Err(); err != nil {
+			events.Close()
+			return nil, fmt.Errorf("iterate request workflow events: %w", err)
+		}
+		events.Close()
+		requests = append(requests, request)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate migration requests: %w", err)
+	}
+	return requests, nil
+}
+
+func GetRequest(db *sql.DB, requestID int64) (Request, error) {
+	var request Request
+	err := db.QueryRow(`
+		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
+		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at
+		FROM migration_change_requests WHERE id=$1`, requestID).Scan(
+		&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action,
+		&request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason,
+		&request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt)
+	if err != nil {
+		return Request{}, err
+	}
+	return request, nil
+}
+
+// Respond records the leader's vote. ready is true when all required leaders approved.
+func Respond(db *sql.DB, requestID int64, userID int, userName, decision, comment string) (ready, rejected bool, err error) {
+	if decision != "approved" && decision != "rejected" {
+		return false, false, errors.New("decision must be approved or rejected")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return false, false, err
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRow(`SELECT status FROM migration_change_requests WHERE id=$1 FOR UPDATE`, requestID).Scan(&status); err != nil {
+		return false, false, err
+	}
+	if status != "pending_review" {
+		return false, false, errors.New("request is not awaiting approval")
+	}
+	result, err := tx.Exec(`
+		UPDATE migration_change_approvals SET decision=$1, comment=$2, responded_at=NOW()
+		WHERE request_id=$3 AND leader_user_id=$4 AND decision='pending'`, decision, strings.TrimSpace(comment), requestID, userID)
+	if err != nil {
+		return false, false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		if err != nil {
+			return false, false, err
+		}
+		return false, false, errors.New("only the assigned group leader can approve this request")
+	}
+	if err := insertEvent(tx, requestID, "leader_"+decision, userID, userName, "Group leader decision"); err != nil {
+		return false, false, err
+	}
+	var pending int
+	var hasRejection bool
+	if err := tx.QueryRow(`
+		SELECT COUNT(*) FILTER (WHERE decision='pending'), BOOL_OR(decision='rejected')
+		FROM migration_change_approvals WHERE request_id=$1`, requestID).Scan(&pending, &hasRejection); err != nil {
+		return false, false, err
+	}
+	if hasRejection {
+		if _, err := tx.Exec(`UPDATE migration_change_requests SET status='rejected', updated_at=NOW() WHERE id=$1`, requestID); err != nil {
+			return false, false, err
+		}
+		if err := insertEvent(tx, requestID, "rejected", userID, userName, "A required group leader rejected the request"); err != nil {
+			return false, false, err
+		}
+		rejected = true
+	} else if pending == 0 {
+		if _, err := tx.Exec(`UPDATE migration_change_requests SET status='approved', updated_at=NOW() WHERE id=$1`, requestID); err != nil {
+			return false, false, err
+		}
+		if err := insertEvent(tx, requestID, "approved", userID, userName, "All required group leaders approved"); err != nil {
+			return false, false, err
+		}
+		ready = true
+	}
+	if err := tx.Commit(); err != nil {
+		return false, false, err
+	}
+	return ready, rejected, nil
+}
+
+func SetStatus(db *sql.DB, requestID int64, status string, actorID int, actorName, note string) error {
+	var expected string
+	switch status {
+	case "pending_queue":
+		expected = "approved"
+	case "running":
+		expected = "pending_queue"
+	case "success", "failed":
+		expected = "running"
+	default:
+		return fmt.Errorf("invalid workflow transition to %q", status)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`
+		UPDATE migration_change_requests
+		SET status=$1, error_message=CASE WHEN $1='failed' THEN NULLIF($2,'') ELSE NULL END, updated_at=NOW()
+		WHERE id=$3 AND status=$4`, status, note, requestID, expected)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return sql.ErrNoRows
+	}
+	if err := insertEvent(tx, requestID, status, actorID, actorName, note); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertEvent(tx *sql.Tx, requestID int64, status string, actorID int, actorName, note string) error {
+	_, err := tx.Exec(`INSERT INTO migration_change_events (request_id,status,actor_user_id,actor_name,note) VALUES ($1,$2,$3,$4,$5)`, requestID, status, actorID, actorName, note)
+	return err
+}

@@ -140,6 +140,7 @@
             <div class="page-header">
                 <h2>User Groups</h2>
             </div>
+            <p class="muted">Assign each group a leader who is a member of that group. A group with database access must have a leader before it can approve migration changes.</p>
 
             <div class="table-wrap">
                 <table>
@@ -147,15 +148,31 @@
                         <tr>
                             <th>Group Name</th>
                             <th>Members Count</th>
+                            <th>Leader</th>
                             <th class="text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {{ if .Groups }}
                         {{ range .Groups }}
+                        {{ $group := . }}
                         <tr>
                             <td class="mono font-bold"><strong>{{ .Name }}</strong></td>
                             <td><span class="badge">{{ .MemberCount }} members</span></td>
+                            <td>
+                                <form method="POST" action="/admin/groups/leader" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <input type="hidden" name="group_id" value="{{ .ID }}">
+                                    <select name="leader_user_id" required>
+                                        <option value="0" {{ if eq $group.LeaderID 0 }}selected{{ end }}>No leader</option>
+                                        {{ range $.Users }}
+                                        <option value="{{ .ID }}" {{ if eq $group.LeaderID .ID }}selected{{ end }}>{{ .Name }} ({{ .Username }})</option>
+                                        {{ end }}
+                                    </select>
+                                    <button type="submit" class="btn btn-outline btn-sm">Set leader</button>
+                                </form>
+                                {{ if .LeaderName }}<small class="muted">Current: {{ .LeaderName }}</small>{{ end }}
+                            </td>
                             <td class="text-right">
                                 <form method="POST" action="/admin/groups/delete" class="inline-form">
                                     <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
