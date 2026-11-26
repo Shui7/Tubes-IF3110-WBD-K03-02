@@ -159,10 +159,24 @@ func (m *Manager) ExecuteMigration(ctx context.Context, version int64, migration
 		return fmt.Errorf("record migration %d: %w", version, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration %d: %w", version, err)
+		return &CommitError{Version: version, Err: err}
 	}
 	return nil
 }
+
+// CommitError is returned when COMMIT of a migration transaction fails. If Err
+// is not a PostgreSQL error (connection lost, timeout), the transaction may or
+// may not have been committed.
+type CommitError struct {
+	Version int64
+	Err     error
+}
+
+func (e *CommitError) Error() string {
+	return fmt.Sprintf("commit migration %d: %v", e.Version, e.Err)
+}
+
+func (e *CommitError) Unwrap() error { return e.Err }
 
 func (m *Manager) recordMigrationFailure(ctx context.Context, version int64, migrationSQL, executedBy, message string) error {
 	tx, err := m.db.BeginTx(ctx, nil)
