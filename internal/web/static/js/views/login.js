@@ -1,5 +1,4 @@
 import {createErrorDiv, createSuccessDiv, setTitle} from "./components.js"
-import {renderHome} from "./home.js"
 import {apiFetch, renderLoading, setCsrfToken, validateSession} from "./utils.js"
 
 export async function renderLoginView() {
@@ -11,6 +10,7 @@ export async function renderLoginView() {
     setTitle("Log in")
     renderLoading()
     refreshLoginCsrfToken()
+    renderNavRight()
 
     const container = document.getElementById("content")
     container.innerHTML = "";    
@@ -117,10 +117,10 @@ export async function renderLoginView() {
 
             passwordInput.value = "";
             setCsrfToken(data.csrfToken)
+            renderNavRight()
 
             window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));
-            renderHome()
         } catch {
             errorDiv.textContent = "Network error occurred when signing in. Try again.";
             errorDiv.hidden = false
@@ -129,6 +129,53 @@ export async function renderLoginView() {
             submitButton.disabled = false;
             submitButton.textContent = "Sign in";
         }
+    })
+}
+
+export async function renderNavRight() {
+    const container = document.getElementById("nav-right")
+    if (container == null) return
+
+    container.innerHTML = ""
+
+    const response = await fetch('/api/auth/name-role');
+    const data = await response.json().catch({"name": "", "role": ""})
+
+    let nameSpan = document.createElement("span")
+    nameSpan.classList.add("muted", "mono")
+    nameSpan.textContent = data.name + " (" + data.role + ")"
+    container.append(nameSpan)
+
+    let logoutButton = document.createElement("button")
+    logoutButton.type = "submit"
+    logoutButton.id = "logout-button"
+    logoutButton.classList.add("btn", "btn-danger", "btn-sm")
+    logoutButton.textContent = "Logout"
+    container.append(logoutButton)
+
+    logoutButton.addEventListener("click", async function (event) {
+        event.preventDefault();
+        try {
+            const response = await apiFetch('/api/auth/logout', {
+                method: 'POST',
+            });
+            const data = await response.json().catch({"csrfToken":""})
+            setCsrfToken(data.csrfToken)
+            renderNavRight()
+            window.history.pushState({}, '', '/login');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch {
+        }
+    })
+
+    let loginButton = document.createElement("a")
+    loginButton.classList.add("btn", "btn-outline", "btn-sm")
+    loginButton.textContent = "Login"
+    container.append(loginButton)
+
+    loginButton.addEventListener("click", async function (event) {
+        event.preventDefault();
+        await renderLoginView()
     })
 }
 
