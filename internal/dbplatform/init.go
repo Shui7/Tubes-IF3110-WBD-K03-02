@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS groups (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,
+    leader_user_id INT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -119,6 +120,44 @@ var migrations = []string{
 	"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
 	"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
 	"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN NOT NULL DEFAULT FALSE",
+	"ALTER TABLE groups ADD COLUMN IF NOT EXISTS leader_user_id INT REFERENCES users(id) ON DELETE SET NULL",
+	`CREATE TABLE IF NOT EXISTS migration_change_requests (
+		id BIGSERIAL PRIMARY KEY,
+		database_id INT NOT NULL REFERENCES database_connections(id),
+		requester_user_id INT NOT NULL,
+		requester_name TEXT NOT NULL,
+		action TEXT NOT NULL CHECK (action IN ('up', 'rollback', 'forward')),
+		sql_up TEXT NOT NULL DEFAULT '',
+		sql_down TEXT NOT NULL DEFAULT '',
+		is_irreversible BOOLEAN NOT NULL DEFAULT FALSE,
+		irreversible_reason TEXT,
+		target_execution_id BIGINT,
+		status TEXT NOT NULL CHECK (status IN ('draft', 'pending_review', 'approved', 'pending_queue', 'running', 'success', 'failed', 'rejected')),
+		error_message TEXT,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+	`CREATE TABLE IF NOT EXISTS migration_change_approvals (
+		id BIGSERIAL PRIMARY KEY,
+		request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,
+		group_id INT NOT NULL,
+		group_name TEXT NOT NULL,
+		leader_user_id INT NOT NULL,
+		leader_name TEXT NOT NULL,
+		decision TEXT NOT NULL DEFAULT 'pending' CHECK (decision IN ('pending', 'approved', 'rejected')),
+		comment TEXT NOT NULL DEFAULT '',
+		responded_at TIMESTAMPTZ,
+		UNIQUE (request_id, group_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS migration_change_events (
+		id BIGSERIAL PRIMARY KEY,
+		request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,
+		status TEXT NOT NULL,
+		actor_user_id INT,
+		actor_name TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '',
+		occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
 }
 
 func InitPlatformDB(connStr string) (*sql.DB, error) {

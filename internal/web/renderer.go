@@ -44,6 +44,8 @@ type GroupItem struct {
 	ID          int
 	Name        string
 	MemberCount int
+	LeaderID    int
+	LeaderName  string
 }
 
 type UserItem struct {
@@ -118,17 +120,49 @@ type MigrationHistoryItem struct {
 
 type DatabaseDetailData struct {
 	BaseData
-	Database      DatabaseItem
-	Tables        []TableSummary
-	SelectedTable string
-	Columns       []ColumnItem
-	Constraints   []ConstraintItem
-	Indexes       []IndexItem
-	DataHeaders   []string
-	DataRows      [][]string
-	Migrations    []MigrationHistoryItem
-	ActiveTab     string
-	Error         string
+	Database       DatabaseItem
+	Tables         []TableSummary
+	SelectedTable  string
+	Columns        []ColumnItem
+	Constraints    []ConstraintItem
+	Indexes        []IndexItem
+	DataHeaders    []string
+	DataRows       [][]string
+	Migrations     []MigrationHistoryItem
+	ChangeRequests []MigrationChangeRequestItem
+	ActiveTab      string
+	Error          string
+}
+
+type MigrationChangeRequestItem struct {
+	ID                 int64
+	Action             string
+	RequesterName      string
+	Status             string
+	TargetExecutionID  int64
+	SQLUp              string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	Error              string
+	CreatedAt          string
+	Approvals          []MigrationApprovalItem
+	Events             []MigrationWorkflowEventItem
+}
+
+type MigrationWorkflowEventItem struct {
+	Status     string
+	ActorName  string
+	Note       string
+	OccurredAt string
+}
+
+type MigrationApprovalItem struct {
+	GroupName  string
+	LeaderName string
+	Decision   string
+	Comment    string
+	CanRespond bool
 }
 
 //go:embed templates/*.html

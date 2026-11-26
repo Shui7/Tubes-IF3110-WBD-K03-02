@@ -24,12 +24,3 @@ UPDATE db_platform_migrations SET executed_sql = sql_text WHERE executed_sql = '
 UPDATE db_platform_migrations
 SET irreversible_reason = 'Legacy migration predates stored SQL down definitions.'
 WHERE is_irreversible = TRUE AND (irreversible_reason IS NULL OR irreversible_reason = '');
-
-CREATE TABLE IF NOT EXISTS db_platform_migration_drafts (
-    id BIGSERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    sql_text TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);

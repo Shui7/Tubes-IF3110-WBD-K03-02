@@ -119,35 +119,6 @@ func TestMigrationRejectsVersionGap(t *testing.T) {
 	}
 }
 
-func TestMigrationDraftLifecycle(t *testing.T) {
-	db := openIntegrationDatabase(t)
-	manager := New(db)
-	ctx := context.Background()
-	draft, err := manager.CreateMigrationDraft(ctx, "add users", "CREATE TABLE users (id INTEGER)", "integration")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = manager.DeleteMigrationDraft(ctx, draft.ID)
-	})
-
-	updated, err := manager.UpdateMigrationDraft(ctx, draft.ID, "add accounts", "CREATE TABLE accounts (id INTEGER)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Name != "add accounts" || updated.SQL != "CREATE TABLE accounts (id INTEGER)" {
-		t.Fatalf("updated draft = %+v", updated)
-	}
-
-	got, err := manager.GetMigrationDraft(ctx, draft.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.ID != draft.ID {
-		t.Fatalf("got draft ID = %d, want %d", got.ID, draft.ID)
-	}
-}
-
 func TestDatabaseViewer(t *testing.T) {
 	db := openIntegrationDatabase(t)
 	manager := New(db)

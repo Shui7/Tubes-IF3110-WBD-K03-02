@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 type Schema struct {
@@ -73,15 +72,6 @@ type Migration struct {
 	Status             string
 	Error              sql.NullString
 	ExecutedAt         sql.NullTime
-}
-
-type MigrationDraft struct {
-	ID        int64
-	Name      string
-	SQL       string
-	CreatedBy string
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 type Manager struct {
