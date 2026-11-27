@@ -43,20 +43,18 @@ func NewAuthHandlerAPI(db *sql.DB, sessionStore *SessionStore) *AuthHandlerAPI {
 // "api/auth/login"
 func (h *AuthHandlerAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed: " + r.Method, http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Cek CSRF
-	formToken := r.FormValue("csrf_token")
-	cookie, err := r.Cookie("csrf_login_cookie")
-	if err != nil || cookie.Value == "" {
-		http.Error(w, "Forbidden: missing CSRF cookie", http.StatusForbidden)
-		return
+	clientCSRF := r.Header.Get("X-CSRF-Token")
+	if clientCSRF == "" {
+		clientCSRF = r.FormValue("csrf_token")
 	}
-
-	if formToken == "" || formToken != cookie.Value {
-		http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+	cookie, err := r.Cookie("csrf_login_cookie")
+	if err != nil || cookie.Value == "" || clientCSRF == "" || clientCSRF != cookie.Value {
+		http.Error(w, "Forbidden: missing or invalid CSRF cookie", http.StatusForbidden)
 		return
 	}
 
