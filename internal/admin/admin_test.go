@@ -135,6 +135,28 @@ func TestAdminFlowIntegration(t *testing.T) {
 	if foundUserID == 0 {
 		t.Fatalf("Expected user %s to be listed", userName)
 	}
+	if err := SetGroupLeader(db, foundGroupID, foundUserID); err != nil {
+		t.Fatalf("SetGroupLeader failed for group member: %v", err)
+	}
+	if err := SetGroupLeader(db, foundGroupID, 1); err != sql.ErrNoRows {
+		t.Fatalf("SetGroupLeader error for nonmember = %v, want sql.ErrNoRows", err)
+	}
+	groups, err = GetGroups(db)
+	if err != nil {
+		t.Fatalf("GetGroups with members failed: %v", err)
+	}
+	foundGroup := false
+	for _, group := range groups {
+		if group.ID == foundGroupID {
+			foundGroup = true
+			if len(group.Members) != 1 || group.Members[0].ID != foundUserID || !group.LeaderIsMember {
+				t.Fatalf("group members/leader = %+v, want test user as the only member and leader", group)
+			}
+		}
+	}
+	if !foundGroup {
+		t.Fatalf("GetGroups did not return group %d", foundGroupID)
+	}
 
 	// Cleanup
 	_ = DeleteUser(db, foundUserID)

@@ -208,11 +208,16 @@
 
         <section id="tab-migrations" class="tab-content" style="display: none;">
             <h2>Migration History</h2>
+            <div class="form-group">
+                <label><input type="checkbox" id="hide-rollback"> Hide rollback</label>
+                <p class="muted">Hides a successful rollback and the exact execution it reverted. Failed attempts and later forward executions remain visible.</p>
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
                             <th>Version</th>
+                            <th>Action / Execution</th>
                             <th>Description</th>
                             <th>Executed By</th>
                             <th>Executed At</th>
@@ -222,8 +227,9 @@
                     <tbody>
                         {{ if .Migrations }}
                         {{ range .Migrations }}
-                        <tr>
+                        <tr class="migration-history-row" data-execution-id="{{ .ExecutionID }}" data-action="{{ .Action }}" data-status="{{ .Status }}" data-target-execution-id="{{ .TargetExecutionID }}">
                             <td class="mono font-bold">{{ .Version }}</td>
+                            <td><span class="badge">{{ .Action }} #{{ .ExecutionID }}</span>{{ if .TargetExecutionID }}<br><span class="muted">targets #{{ .TargetExecutionID }}</span>{{ end }}</td>
                             <td>{{ .Name }}</td>
                             <td>{{ .ExecutedBy }}</td>
                             <td class="mono">{{ .ExecutedAt }}</td>
@@ -235,11 +241,99 @@
                                 {{ end }}
                             </td>
                         </tr>
+                        <tr class="migration-history-row" data-execution-id="{{ .ExecutionID }}" data-action="{{ .Action }}" data-status="{{ .Status }}" data-target-execution-id="{{ .TargetExecutionID }}">
+                            <td colspan="6">
+                                {{ if and (eq $.Database.AccessLevel "edit") .CanRollback }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/rollback" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <input type="hidden" name="execution_id" value="{{ .ExecutionID }}">
+                                    <button type="submit" class="btn btn-outline btn-sm">Rollback</button>
+                                </form>
+                                {{ end }}
+                                {{ if and (eq $.Database.AccessLevel "edit") .CanForward }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/forward" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <input type="hidden" name="execution_id" value="{{ .ExecutionID }}">
+                                    <button type="submit" class="btn btn-outline btn-sm">Forward</button>
+                                </form>
+                                {{ end }}
+                                <details>
+                                    <summary>Migration definition</summary>
+                                    {{ if .MigrationID }}<p><strong>Migration request:</strong> #{{ .MigrationID }}</p>{{ end }}
+                                    {{ if .JobID }}<p><strong>Job:</strong> <a href="/api/jobs/{{ .JobID }}">{{ .JobID }}</a></p>{{ end }}
+                                    {{ if .RequestID }}<p><strong>Request ID:</strong> {{ .RequestID }}</p>{{ end }}
+                                    {{ if .Revision }}<p><strong>Revision:</strong> {{ .Revision }}</p>{{ end }}
+                                    <p><strong>SQL executed by this attempt</strong></p>
+                                    <pre class="mono">{{ .ExecutedSQL }}</pre>
+                                    <p><strong>SQL up</strong></p>
+                                    <pre class="mono">{{ .SQL }}</pre>
+                                    {{ if .Irreversible }}
+                                    <p><strong>Irreversible:</strong> {{ .IrreversibleReason }}</p>
+                                    {{ else }}
+                                    <p><strong>SQL down</strong></p>
+                                    <pre class="mono">{{ .SQLDown }}</pre>
+                                    {{ end }}
+                                </details>
+                            </td>
+                        </tr>
                         {{ end }}
                         {{ else }}
                         <tr>
-                            <td colspan="5" class="empty center">No migration history recorded.</td>
+                            <td colspan="6" class="empty center">No migration history recorded.</td>
                         </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Migration requests and approvals</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Request</th><th>Action</th><th>Requester</th><th>Status</th><th>Required approvals</th><th>Error</th></tr>
+                    </thead>
+                    <tbody>
+                        {{ if .ChangeRequests }}
+                        {{ range .ChangeRequests }}
+                        {{ $request := . }}
+                        <tr>
+                            <td class="mono">#{{ .ID }}<br><small>{{ .CreatedAt }}</small></td>
+                            <td>{{ .Action }}{{ if .TargetExecutionID }} #{{ .TargetExecutionID }}{{ end }}</td>
+                            <td>{{ .RequesterName }}</td>
+                            <td><span class="badge">{{ .Status }}</span></td>
+                            <td>
+                                {{ range .Approvals }}
+                                <div>{{ .GroupName }} — {{ .LeaderName }}: <strong>{{ .Decision }}</strong></div>
+                                {{ if .CanRespond }}
+                                <form method="POST" action="/databases/{{ $.Database.ID }}/migrations/requests/{{ $request.ID }}/decision" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
+                                    <button type="submit" class="btn btn-primary btn-sm" name="decision" value="approved">Approve</button>
+                                    <button type="submit" class="btn btn-danger btn-sm" name="decision" value="rejected">Reject</button>
+                                </form>
+                                {{ end }}
+                                {{ end }}
+                            </td>
+                            <td>{{ .Error }}</td>
+                        </tr>
+                        <tr><td colspan="6">
+                            <details><summary>Workflow history and request details</summary>
+                                <ol>
+                                    {{ range .Events }}<li><strong>{{ .Status }}</strong> — {{ .ActorName }} — {{ .OccurredAt }}: {{ .Note }}</li>{{ end }}
+                                </ol>
+                                {{ if eq $request.Action "up" }}
+                                <p><strong>Mode:</strong> {{ $request.Mode }}{{ if eq $request.Mode "batch" }} (size {{ $request.BatchSize }}){{ if $request.BatchTable }}; table {{ $request.BatchTable }}, cursor {{ $request.BatchColumn }}{{ end }}{{ end }}</p>
+                                <p><strong>SQL up</strong></p><pre class="mono">{{ $request.SQLUp }}</pre>
+                                {{ if $request.Irreversible }}<p><strong>Irreversible:</strong> {{ $request.IrreversibleReason }}</p>{{ else }}<p><strong>SQL down</strong></p><pre class="mono">{{ $request.SQLDown }}</pre>{{ end }}
+                                {{ else if eq $request.Action "rollback" }}
+                                <p><strong>SQL down to execute</strong></p><pre class="mono">{{ $request.SQLDown }}</pre>
+                                {{ else }}
+                                <p><strong>SQL up to execute</strong></p><pre class="mono">{{ $request.SQLUp }}</pre>
+                                {{ end }}
+                            </details>
+                        </td></tr>
+                        {{ end }}
+                        {{ else }}
+                        <tr><td colspan="6" class="empty center">No migration change requests.</td></tr>
                         {{ end }}
                     </tbody>
                 </table>
@@ -247,24 +341,49 @@
 
             {{ if eq .Database.AccessLevel "edit" }}
             <div class="form-card mt-1">
-                <h3>Create Migration</h3>
+                <h3>Submit Migration for Approval</h3>
                 <form method="POST" action="/databases/{{ .Database.ID }}/migrations">
                     <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
 
                     <div class="form-group">
-                        <label for="migration_name">Migration Name</label>
-                        <input type="text" id="migration_name" name="name" required
-                            placeholder="e.g. 002_add_discount_column">
+                        <label for="migration_mode">Execution mode</label>
+                        <select id="migration_mode" name="mode">
+                            <option value="plain">Plain migration</option>
+                            <option value="batch">Batch migration</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="batch-options" hidden>
+                        <label for="batch_size">Batch size</label>
+                        <input id="batch_size" name="batch_size" type="number" min="1" max="100000" value="1000">
+                        <label for="batch_table">Batch table (optional, for batch-by-attribute)</label>
+                        <input id="batch_table" name="batch_table" placeholder="public.big_items">
+                        <label for="batch_column">Unique cursor column</label>
+                        <input id="batch_column" name="batch_column" placeholder="id">
+                        <p class="muted">For attribute mode, use {{"{{batch_filter}}"}} in SQL up. Otherwise write a cursor query using $1 (last cursor) and $2 (batch size).</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="migration_sql">Migration SQL</label>
-                        <textarea id="migration_sql" class="sql-editor" name="sql" rows="8"
+                        <label for="migration_sql_up">SQL up</label>
+                        <textarea id="migration_sql_up" class="sql-editor" name="sql_up" rows="8" required
                             placeholder="ALTER TABLE orders ADD COLUMN discount NUMERIC(10, 2) DEFAULT 0.00;"></textarea>
                     </div>
 
+                    <div class="form-group" id="sql-down-group">
+                        <label for="migration_sql_down">SQL down</label>
+                        <textarea id="migration_sql_down" class="sql-editor" name="sql_down" rows="8"
+                            placeholder="ALTER TABLE orders DROP COLUMN discount;"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label><input type="checkbox" id="migration_irreversible" name="irreversible"> Mark as irreversible</label>
+                    </div>
+                    <div class="form-group" id="irreversible-reason-group" hidden>
+                        <label for="irreversible_reason">Reason</label>
+                        <textarea id="irreversible_reason" name="irreversible_reason" rows="3" placeholder="Explain why this migration cannot be safely reversed."></textarea>
+                    </div>
+
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Execute Migration</button>
+                        <button type="submit" class="btn btn-primary">Submit for Approval</button>
                     </div>
                 </form>
             </div>
@@ -287,6 +406,52 @@
     </footer>
 
     <script>
+        (function () {
+            const hideRollback = document.getElementById('hide-rollback');
+            if (!hideRollback) return;
+            const historyRows = Array.from(document.querySelectorAll('.migration-history-row'));
+            async function updateRollbackFilter() {
+                const url = '/api/databases/{{ .Database.ID }}/migrations/visibility?hide_rollback=' + hideRollback.checked;
+                try {
+                    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                    if (!response.ok) throw new Error('Migration visibility request failed: ' + response.status);
+                    const result = await response.json();
+                    const hiddenExecutionIDs = new Set(result.hidden_execution_ids.map(String));
+                    historyRows.forEach(row => {
+                        row.hidden = hiddenExecutionIDs.has(row.dataset.executionId);
+                    });
+                } catch (error) {
+                    console.error(error);
+                }
+            }
+            hideRollback.addEventListener('change', updateRollbackFilter);
+        })();
+
+        (function () {
+            const irreversible = document.getElementById('migration_irreversible');
+            const down = document.getElementById('migration_sql_down');
+            const downGroup = document.getElementById('sql-down-group');
+            const reasonGroup = document.getElementById('irreversible-reason-group');
+            const reason = document.getElementById('irreversible_reason');
+            function updateDefinitionFields() {
+                downGroup.hidden = irreversible.checked;
+                down.required = !irreversible.checked;
+                reasonGroup.hidden = !irreversible.checked;
+                reason.required = irreversible.checked;
+            }
+            irreversible.addEventListener('change', updateDefinitionFields);
+            updateDefinitionFields();
+        })();
+
+        (function () {
+            const mode = document.getElementById('migration_mode');
+            const options = document.getElementById('batch-options');
+            if (!mode || !options) return;
+            function updateBatchOptions() { options.hidden = mode.value !== 'batch'; }
+            mode.addEventListener('change', updateBatchOptions);
+            updateBatchOptions();
+        })();
+
         (function () {
             const tabs = document.querySelectorAll('#detail-tabs .tab-link');
             const sections = document.querySelectorAll('.tab-content');

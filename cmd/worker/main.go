@@ -15,6 +15,7 @@ import (
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/jobs"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/managed"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 	_ "github.com/lib/pq"
 )
 
@@ -80,7 +81,7 @@ func run(ctx context.Context) error {
 	worker := jobs.NewWorker(
 		jobs.NewStore(db),
 		&jobs.ManagerExecutor{Registry: registry},
-		jobs.NoopValidator{}, // TODO: approval/validation from the workflow
+		workflow.ExecutionValidator{PlatformDB: db, Registry: registry},
 		jobs.WorkerConfig{
 			ID:          fmt.Sprintf("%s-%d", hostname, os.Getpid()),
 			Concurrency: envInt("WORKER_CONCURRENCY", 4),

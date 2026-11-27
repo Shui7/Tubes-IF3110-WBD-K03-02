@@ -72,9 +72,15 @@ func TestMigrationSuccessAndRollback(t *testing.T) {
 
 	failedVersion := version + 1
 	rollbackTable := table + "_rollback"
-	if err := manager.ExecuteMigration(ctx, failedVersion,
+	failedMetadata := MigrationMetadata{
+		MigrationID: sql.NullInt64{Int64: 123, Valid: true},
+		JobID:       sql.NullString{String: "failed-job", Valid: true},
+		RequestID:   "failed-request",
+		Revision:    1,
+	}
+	if err := manager.ExecuteMigrationDefinitionWithMetadata(ctx, failedVersion,
 		`CREATE TABLE "`+rollbackTable+`" (id INTEGER); INSERT INTO "`+rollbackTable+`" (missing_column) VALUES (1)`,
-		"integration"); err == nil {
+		"", true, "integration failure", "integration", failedMetadata); err == nil {
 		t.Fatal("invalid migration unexpectedly succeeded")
 	}
 
@@ -97,9 +103,39 @@ func TestMigrationSuccessAndRollback(t *testing.T) {
 		t.Fatalf("failed migration status = %q, want failed", status)
 	}
 
-	if err := manager.ExecuteMigration(ctx, failedVersion,
-		`CREATE TABLE "`+retryTable+`" (id INTEGER PRIMARY KEY)`, "integration"); err != nil {
+	var migrationID int64
+	var jobID, requestID string
+	var revision int
+	if err := db.QueryRowContext(ctx, `SELECT migration_id, job_id, request_id, revision FROM db_platform_migrations WHERE version=$1 AND status='failed'`, failedVersion).
+		Scan(&migrationID, &jobID, &requestID, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if migrationID != failedMetadata.MigrationID.Int64 || jobID != failedMetadata.JobID.String ||
+		requestID != failedMetadata.RequestID || revision != failedMetadata.Revision {
+		t.Fatalf("failed attempt metadata = %d/%s/%s/%d, want %d/%s/%s/%d",
+			migrationID, jobID, requestID, revision, failedMetadata.MigrationID.Int64,
+			failedMetadata.JobID.String, failedMetadata.RequestID, failedMetadata.Revision)
+	}
+
+	successMetadata := MigrationMetadata{
+		MigrationID: sql.NullInt64{Int64: 124, Valid: true},
+		JobID:       sql.NullString{String: "retry-job", Valid: true},
+		RequestID:   "retry-request",
+		Revision:    2,
+	}
+	if err := manager.ExecuteMigrationDefinitionWithMetadata(ctx, failedVersion,
+		`CREATE TABLE "`+retryTable+`" (id INTEGER PRIMARY KEY)`, "", true, "integration retry",
+		"integration", successMetadata); err != nil {
 		t.Fatalf("retry failed migration version: %v", err)
+	}
+	success, err := manager.GetMigration(ctx, failedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if success.Status != "success" || success.MigrationID.Int64 != successMetadata.MigrationID.Int64 ||
+		success.JobID.String != successMetadata.JobID.String || success.RequestID.String != successMetadata.RequestID ||
+		success.Revision != successMetadata.Revision {
+		t.Fatalf("successful retry metadata = %+v, want %+v", success, successMetadata)
 	}
 }
 
@@ -119,32 +155,77 @@ func TestMigrationRejectsVersionGap(t *testing.T) {
 	}
 }
 
-func TestMigrationDraftLifecycle(t *testing.T) {
+func TestRollbackAndForwardMigrationActions(t *testing.T) {
 	db := openIntegrationDatabase(t)
-	manager := New(db)
 	ctx := context.Background()
-	draft, err := manager.CreateMigrationDraft(ctx, "add users", "CREATE TABLE users (id INTEGER)", "integration")
+	manager := New(db)
+	if err := manager.EnsureMigrationTable(ctx); err != nil {
+		t.Fatal(err)
+	}
+	version, err := manager.NextMigrationVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := fmt.Sprintf("action_integration_%d", time.Now().UnixNano())
+	if err := manager.ExecuteMigrationDefinition(ctx, version,
+		`CREATE TABLE "`+table+`" (id INTEGER PRIMARY KEY)`,
+		`DROP TABLE "`+table+`"`, false, "", "integration"); err != nil {
+		t.Fatalf("execute reversible migration: %v", err)
+	}
+	up, err := manager.GetMigration(ctx, version)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = manager.DeleteMigrationDraft(ctx, draft.ID)
+		_, _ = db.Exec(`DROP TABLE IF EXISTS "` + table + `"`)
+		_, _ = db.Exec(`DELETE FROM db_platform_migrations WHERE version=$1 AND id<>$2`, version, up.ExecutionID)
+		_, _ = db.Exec(`DELETE FROM db_platform_migrations WHERE id=$1`, up.ExecutionID)
 	})
 
-	updated, err := manager.UpdateMigrationDraft(ctx, draft.ID, "add accounts", "CREATE TABLE accounts (id INTEGER)")
-	if err != nil {
+	var exists bool
+	tableExists := func() bool {
+		t.Helper()
+		if err := db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table,
+		).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		return exists
+	}
+	if !tableExists() {
+		t.Fatal("up migration did not create its table")
+	}
+	if err := manager.ForwardMigration(ctx, up.ExecutionID, "integration"); err == nil {
+		t.Fatal("forwarding an up execution unexpectedly succeeded")
+	}
+	var rejectedForward int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM db_platform_migrations
+		WHERE version=$1 AND action='forward' AND status='failed'`, version).Scan(&rejectedForward); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Name != "add accounts" || updated.SQL != "CREATE TABLE accounts (id INTEGER)" {
-		t.Fatalf("updated draft = %+v", updated)
+	if rejectedForward != 1 {
+		t.Fatalf("rejected forward attempts = %d, want 1 recorded failure", rejectedForward)
 	}
 
-	got, err := manager.GetMigrationDraft(ctx, draft.ID)
-	if err != nil {
-		t.Fatal(err)
+	if err := manager.RollbackMigration(ctx, up.ExecutionID, "integration"); err != nil {
+		t.Fatalf("RollbackMigration: %v", err)
 	}
-	if got.ID != draft.ID {
-		t.Fatalf("got draft ID = %d, want %d", got.ID, draft.ID)
+	if tableExists() {
+		t.Fatal("rollback migration did not drop its table")
+	}
+	var rollbackID int64
+	if err := db.QueryRowContext(ctx, `
+		SELECT id FROM db_platform_migrations
+		WHERE version=$1 AND action='rollback' AND status='success'
+		ORDER BY id DESC LIMIT 1`, version).Scan(&rollbackID); err != nil {
+		t.Fatalf("read rollback execution: %v", err)
+	}
+	if err := manager.ForwardMigration(ctx, rollbackID, "integration"); err != nil {
+		t.Fatalf("ForwardMigration: %v", err)
+	}
+	if !tableExists() {
+		t.Fatal("forward migration did not recreate its table")
 	}
 }
 

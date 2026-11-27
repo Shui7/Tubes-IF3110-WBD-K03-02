@@ -2,7 +2,7 @@ package auth
 
 import (
 	"database/sql"
-	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -46,11 +46,13 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 	formToken := r.FormValue("csrf_token")
 	cookie, err := r.Cookie("csrf_login_cookie")
 	if err != nil || cookie.Value == "" {
+		slog.WarnContext(r.Context(), "auth.login.failed", "reason", "missing_csrf_cookie")
 		http.Error(w, "Forbidden: missing CSRF cookie", http.StatusForbidden)
 		return
 	}
 
 	if formToken == "" || formToken != cookie.Value {
+		slog.WarnContext(r.Context(), "auth.login.failed", "reason", "invalid_csrf_token")
 		http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
 		return
 	}
@@ -64,18 +66,21 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 	var userID int
 	var passwordHash string
 	query := "SELECT id, password_hash FROM users WHERE username = $1"
-	err = h.db.QueryRow(query, req.Username).Scan(&userID, &passwordHash)
+	err = h.db.QueryRowContext(r.Context(), query, req.Username).Scan(&userID, &passwordHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			slog.WarnContext(r.Context(), "auth.login.failed", "reason", "invalid_credentials")
 			renderLoginWithError(w, formToken, "Invalid username or password")
 			return
 		}
+		slog.ErrorContext(r.Context(), "auth.login.failed", "reason", "user_lookup", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Verifikasi password
 	if !password.VerifyPasswordHash(req.Password, passwordHash) {
+		slog.WarnContext(r.Context(), "auth.login.failed", "reason", "invalid_credentials")
 		renderLoginWithError(w, formToken, "Invalid username or password")
 		return
 	}
@@ -83,9 +88,11 @@ func (h *AuthHandler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) 
 	// Pembuatan session
 	sess, err := h.sessionStore.CreateSession(userID)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "auth.login.failed", "reason", "session_creation", "user_id", userID, "error", err)
 		renderLoginWithError(w, formToken, err.Error())
 		return
 	}
+	slog.InfoContext(r.Context(), "auth.login.succeeded", "user_id", userID)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_id",
@@ -154,8 +161,13 @@ func renderLoginWithError(w http.ResponseWriter, csrf_token string, err string) 
 func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_id")
 	if err == nil && cookie != nil {
-		_ = h.sessionStore.RevokeSession(cookie.Value)
+		if err := h.sessionStore.RevokeSession(cookie.Value); err != nil {
+			slog.ErrorContext(r.Context(), "auth.logout.failed", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 	}
+	slog.InfoContext(r.Context(), "auth.logout.succeeded")
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_id",
@@ -168,6 +180,5 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Logout successful"})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

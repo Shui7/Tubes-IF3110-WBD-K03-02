@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/managed"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 	"github.com/lib/pq"
 )
 
@@ -24,18 +26,22 @@ type Executor interface {
 	WasApplied(ctx context.Context, job Job, version int64) (bool, error)
 }
 
-// Validator re-checks a job right before execution (approval still valid,
-// version still next, user still has access, SQL hash unchanged, etc.).
-// Return an error wrapping ErrValidation to fail the job permanently.
-// TODO: Implement Validator
+// Validator re-checks a queued execution immediately before it is run.
 type Validator interface {
-	Validate(ctx context.Context, job Job) error
+	Validate(ctx context.Context, job workflow.ExecutionJob) error
 }
 
-// NoopValidator accepts everything.
-type NoopValidator struct{}
+type FailureRecorder interface {
+	RecordFailure(ctx context.Context, job Job, version int64, cause error) error
+}
 
-func (NoopValidator) Validate(context.Context, Job) error { return nil }
+var ErrValidation = errors.New("job validation failed")
+
+type unconfiguredValidator struct{}
+
+func (unconfiguredValidator) Validate(context.Context, workflow.ExecutionJob) error {
+	return fmt.Errorf("%w: execution validator is not configured", ErrValidation)
+}
 
 // ManagerExecutor uses the existing dbmanager history (db_platform_migrations in the target database).
 type ManagerExecutor struct {
@@ -55,16 +61,93 @@ func (e *ManagerExecutor) Execute(ctx context.Context, job Job, version int64) e
 	if err != nil {
 		return err
 	}
-	return m.ExecuteMigration(ctx, version, job.SQL, job.RequestedBy)
+	switch job.Kind {
+	case "", "up":
+		return m.ExecuteMigrationDefinitionWithMetadata(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy, migrationMetadata(job))
+	case "rollback":
+		if !job.TargetExecutionID.Valid {
+			return errors.New("queued rollback has no target execution ID")
+		}
+		target, err := m.GetMigrationExecution(ctx, job.TargetExecutionID.Int64)
+		if err != nil {
+			return err
+		}
+		if target.SQLDown != job.SQL {
+			return errors.New("queued rollback SQL differs from the immutable migration definition")
+		}
+		return m.RollbackMigrationWithMetadata(ctx, job.TargetExecutionID.Int64, job.RequestedBy, migrationMetadata(job))
+	case "forward":
+		if !job.TargetExecutionID.Valid {
+			return errors.New("queued forward has no target execution ID")
+		}
+		target, err := m.GetMigrationExecution(ctx, job.TargetExecutionID.Int64)
+		if err != nil {
+			return err
+		}
+		if target.SQL != job.SQL {
+			return errors.New("queued forward SQL differs from the immutable migration definition")
+		}
+		return m.ForwardMigrationWithMetadata(ctx, job.TargetExecutionID.Int64, job.RequestedBy, migrationMetadata(job))
+	default:
+		return fmt.Errorf("unsupported migration job kind %q", job.Kind)
+	}
 }
 
-// WasApplied checks whether a successful migration with the same version
-// and SQL has already been recorded.
-// TODO: check execution_id once history has it.
+func (e *ManagerExecutor) RecordFailure(ctx context.Context, job Job, version int64, cause error) error {
+	m, err := e.Registry.Get(ctx, job.DatabaseID)
+	if err != nil {
+		return err
+	}
+	if job.Kind == "rollback" || job.Kind == "forward" {
+		if !job.TargetExecutionID.Valid {
+			return errors.New("failed migration action has no target execution ID")
+		}
+		return m.RecordMigrationActionFailure(ctx, job.TargetExecutionID.Int64, job.Kind, job.RequestedBy, cause.Error(), migrationMetadata(job))
+	}
+	if version < 1 {
+		version, err = m.NextMigrationVersion(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return m.RecordMigrationFailureDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible,
+		job.IrreversibleReason, job.RequestedBy, cause.Error(), migrationMetadata(job))
+}
+
+func migrationMetadata(job Job) dbmanager.MigrationMetadata {
+	return dbmanager.MigrationMetadata{
+		MigrationID: job.WorkflowRequestID,
+		JobID:       sql.NullString{String: job.ID, Valid: job.ID != ""},
+		RequestID:   job.RequestID,
+		Revision:    job.Attempt,
+	}
+}
+
+// WasApplied checks the history row linked to this job, with compatibility
+// fallbacks for history written before job IDs were stored.
 func (e *ManagerExecutor) WasApplied(ctx context.Context, job Job, version int64) (bool, error) {
 	m, err := e.Registry.Get(ctx, job.DatabaseID)
 	if err != nil {
 		return false, err
+	}
+	migrations, err := m.ListMigrations(ctx)
+	if err != nil {
+		return false, err
+	}
+	for i := len(migrations) - 1; i >= 0; i-- {
+		migration := migrations[i]
+		if migration.Version == version && migration.JobID.Valid && migration.JobID.String == job.ID {
+			return migration.Status == "success", nil
+		}
+	}
+	if job.Kind == "rollback" || job.Kind == "forward" {
+		for i := len(migrations) - 1; i >= 0; i-- {
+			migration := migrations[i]
+			if migration.Version == version && migration.Action == job.Kind && migration.TargetExecutionID.Valid && job.TargetExecutionID.Valid && migration.TargetExecutionID.Int64 == job.TargetExecutionID.Int64 {
+				return migration.Status == "success", nil
+			}
+		}
+		return false, nil
 	}
 	migration, err := m.GetMigration(ctx, version)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -75,10 +158,6 @@ func (e *ManagerExecutor) WasApplied(ctx context.Context, job Job, version int64
 	}
 	return migration.Status == "success" && migration.SQL == job.SQL, nil
 }
-
-// ErrValidation marks a job that must fail permanently because revalidation
-// before execution rejected it (approval revoked, version conflict, etc.).
-var ErrValidation = errors.New("job validation failed")
 
 // SQLState returns the PostgreSQL SQLSTATE code inside err, or "".
 func SQLState(err error) string {

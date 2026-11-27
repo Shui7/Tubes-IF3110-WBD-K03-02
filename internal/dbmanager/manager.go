@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 type Schema struct {
@@ -60,21 +59,30 @@ type Relationship struct {
 type Row map[string]any
 
 type Migration struct {
-	Version    int64
-	SQL        string
-	ExecutedBy string
-	Status     string
-	Error      sql.NullString
-	ExecutedAt sql.NullTime
+	ExecutionID        int64
+	Version            int64
+	MigrationID        sql.NullInt64
+	JobID              sql.NullString
+	RequestID          sql.NullString
+	Revision           int
+	SQL                string
+	ExecutedSQL        string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason sql.NullString
+	ExecutedBy         string
+	Action             string
+	TargetExecutionID  sql.NullInt64
+	Status             string
+	Error              sql.NullString
+	ExecutedAt         sql.NullTime
 }
 
-type MigrationDraft struct {
-	ID        int64
-	Name      string
-	SQL       string
-	CreatedBy string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+type MigrationMetadata struct {
+	MigrationID sql.NullInt64 // ID of the workflow migration request
+	JobID       sql.NullString
+	RequestID   string
+	Revision    int // worker attempt number
 }
 
 type Manager struct {

@@ -1,9 +1,10 @@
-﻿// Package authz implements authorization logic for the database management platform.
+// Package authz implements authorization logic for the database management platform.
 // Per spec: access control rules are intentionally separated from authentication
 // so that permission checks, access management, and auditing can be done in a structured way.
 package authz
 
 import (
+	"context"
 	"database/sql"
 )
 
@@ -25,9 +26,9 @@ type DatabaseAccess struct {
 	AccessLevel  AccessLevel
 }
 
-func GetUserDatabaseAccess(db *sql.DB, userID, databaseID int) (AccessLevel, error) {
+func GetUserDatabaseAccess(ctx context.Context, db *sql.DB, userID, databaseID int) (AccessLevel, error) {
 	var isAdmin bool
-	err := db.QueryRow(`SELECT is_admin OR (role = 'Admin') FROM users WHERE id = $1`, userID).Scan(&isAdmin)
+	err := db.QueryRowContext(ctx, `SELECT is_admin OR (role = 'Admin') FROM users WHERE id = $1`, userID).Scan(&isAdmin)
 	if err != nil {
 		return AccessNone, err
 	}
@@ -36,7 +37,7 @@ func GetUserDatabaseAccess(db *sql.DB, userID, databaseID int) (AccessLevel, err
 	}
 
 	var level string
-	err = db.QueryRow(`
+	err = db.QueryRowContext(ctx, `
 		SELECT CASE
 			WHEN bool_or(gda.access_level = 'edit') THEN 'edit'
 			WHEN bool_or(gda.access_level = 'view') THEN 'view'

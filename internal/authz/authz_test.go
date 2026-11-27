@@ -1,6 +1,7 @@
-﻿package authz_test
+package authz_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -28,11 +29,11 @@ func openTestDB(t *testing.T) *sql.DB {
 // setupAuthzFixture creates a minimal set of users, groups, connections, and
 // access grants for testing. Returns IDs and a cleanup function.
 type authzFixture struct {
-	adminID   int
-	userID    int
-	groupID   int
-	connID    int
-	db        *sql.DB
+	adminID int
+	userID  int
+	groupID int
+	connID  int
+	db      *sql.DB
 }
 
 func setupFixture(t *testing.T, db *sql.DB) authzFixture {
@@ -108,7 +109,7 @@ func TestGetUserDatabaseAccess_NoAccess(t *testing.T) {
 	f := setupFixture(t, db)
 
 	// User has no group membership → should get AccessNone
-	level, err := authz.GetUserDatabaseAccess(db, f.userID, f.connID)
+	level, err := authz.GetUserDatabaseAccess(context.Background(), db, f.userID, f.connID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestGetUserDatabaseAccess_ViewAccess(t *testing.T) {
 	db.Exec(`INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)`, f.userID, f.groupID)
 	db.Exec(`INSERT INTO group_database_access (group_id, database_id, db_id, access_level) VALUES ($1, $2, $2, 'view')`, f.groupID, f.connID)
 
-	level, err := authz.GetUserDatabaseAccess(db, f.userID, f.connID)
+	level, err := authz.GetUserDatabaseAccess(context.Background(), db, f.userID, f.connID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +142,7 @@ func TestGetUserDatabaseAccess_EditAccess(t *testing.T) {
 	db.Exec(`INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)`, f.userID, f.groupID)
 	db.Exec(`INSERT INTO group_database_access (group_id, database_id, db_id, access_level) VALUES ($1, $2, $2, 'edit')`, f.groupID, f.connID)
 
-	level, err := authz.GetUserDatabaseAccess(db, f.userID, f.connID)
+	level, err := authz.GetUserDatabaseAccess(context.Background(), db, f.userID, f.connID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestGetUserDatabaseAccess_AdminBypass(t *testing.T) {
 	f := setupFixture(t, db)
 
 	// Admin has no group membership, yet should get edit access to everything
-	level, err := authz.GetUserDatabaseAccess(db, f.adminID, f.connID)
+	level, err := authz.GetUserDatabaseAccess(context.Background(), db, f.adminID, f.connID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestGetUserDatabaseAccess_MultiGroupHighestWins(t *testing.T) {
 	db.Exec(`INSERT INTO group_database_access (group_id, database_id, db_id, access_level) VALUES ($1, $2, $2, 'edit')`, group2ID, f.connID)
 
 	// Documented rule: highest privilege wins → expect edit
-	level, err := authz.GetUserDatabaseAccess(db, f.userID, f.connID)
+	level, err := authz.GetUserDatabaseAccess(context.Background(), db, f.userID, f.connID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

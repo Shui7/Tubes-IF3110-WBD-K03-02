@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -50,7 +51,7 @@ func NewWorker(store *Store, exec Executor, validator Validator, cfg WorkerConfi
 		cfg.BaseBackoff = 2 * time.Second
 	}
 	if validator == nil {
-		validator = NoopValidator{}
+		validator = unconfiguredValidator{}
 	}
 	return &Worker{cfg: cfg, store: store, exec: exec, validator: validator}
 }
@@ -125,6 +126,7 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 		attribute.Int("database.id", job.DatabaseID),
 		attribute.Int("job.attempt", job.Attempt),
 		attribute.String("job.kind", job.Kind),
+		attribute.String("request.id", job.RequestID),
 	))
 	defer span.End()
 
@@ -137,23 +139,50 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 	jobCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go w.heartbeat(jobCtx, job.ID, cancel)
+	if job.WorkflowRequestID.Valid {
+		if err := workflow.SetStatus(w.store.db, job.WorkflowRequestID.Int64, "running", 0, w.cfg.ID, "Execution started by queue worker"); err != nil {
+			slog.ErrorContext(ctx, "migration.workflow_status_update_failed", "job_id", job.ID, "status", "running", "error", err)
+			w.fail(ctx, job, err)
+			return
+		}
+	}
 
 	// Revalidate right before running.
 	_, valSpan := tracer.Start(jobCtx, "revalidation")
-	if err := w.validator.Validate(jobCtx, job); err != nil {
+	if err := w.validator.Validate(jobCtx, workflowExecution(job)); err != nil {
 		observability.RecordError(valSpan, err)
 		valSpan.End()
 		slog.WarnContext(ctx, "revalidation.result", "job_id", job.ID, "ok", false, "error", err)
+		if IsTransient(err) || jobCtx.Err() != nil {
+			w.finish(ctx, jobCtx, job, err)
+			return
+		}
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		w.recordFailure(sctx, job, err)
+		cancel()
 		w.fail(ctx, job, err)
 		return
 	}
 	valSpan.End()
 	slog.InfoContext(ctx, "revalidation.result", "job_id", job.ID, "ok", true)
 
-	version, err := w.exec.NextVersion(jobCtx, job.DatabaseID)
-	if err == nil {
-		// Persist the version first: crash recovery needs it to find evidence.
-		err = w.store.SetVersion(jobCtx, job.ID, version)
+	if job.Mode == ModeBatch {
+		w.processBatch(ctx, jobCtx, job)
+		return
+	}
+
+	var version int64
+	var err error
+	if job.Kind == "up" || job.Kind == "" {
+		version, err = w.exec.NextVersion(jobCtx, job.DatabaseID)
+		if err == nil {
+			// Persist the version first: crash recovery needs it to find evidence.
+			err = w.store.SetVersion(jobCtx, job.ID, version)
+		}
+	} else if job.Version.Valid {
+		version = job.Version.Int64
+	} else {
+		err = errors.New("queued rollback/forward job has no migration version")
 	}
 	if err != nil {
 		w.finish(ctx, jobCtx, job, err)
@@ -176,6 +205,17 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 	w.finish(ctx, jobCtx, job, execErr)
 }
 
+func workflowExecution(job Job) workflow.ExecutionJob {
+	return workflow.ExecutionJob{
+		ID: job.ID, DatabaseID: job.DatabaseID, Kind: job.Kind, Mode: job.Mode,
+		BatchSize: job.BatchSize, BatchTable: job.BatchTable, BatchColumn: job.BatchColumn,
+		SQL: job.SQL, SQLDown: job.SQLDown, SQLSHA256: job.SQLSHA256,
+		Irreversible: job.Irreversible, IrreversibleReason: job.IrreversibleReason,
+		TargetExecutionID: job.TargetExecutionID, WorkflowRequestID: job.WorkflowRequestID,
+		Version: job.Version, RequestedBy: job.RequestedBy,
+	}
+}
+
 // finish records the outcome. State updates use a context that survives
 // cancellation so that a shutdown cannot leave the job in 'running'.
 func (w *Worker) finish(ctx, jobCtx context.Context, job Job, execErr error) {
@@ -189,6 +229,7 @@ func (w *Worker) finish(ctx, jobCtx context.Context, job Job, execErr error) {
 			return
 		}
 		slog.InfoContext(ctx, "job.finished", "job_id", job.ID, "status", StatusSuccess)
+		w.updateWorkflowStatus(ctx, job, "success", "Execution completed")
 
 	case IsCommitUncertain(execErr):
 		slog.WarnContext(ctx, "job.uncertain", "job_id", job.ID, "error", execErr)
@@ -236,10 +277,31 @@ func (w *Worker) fail(ctx context.Context, job Job, cause error) {
 		return
 	}
 	slog.ErrorContext(ctx, "job.failed", "job_id", job.ID, "sqlstate", SQLState(cause), "error", cause)
+	w.updateWorkflowStatus(ctx, job, "failed", msg)
+}
+
+func (w *Worker) updateWorkflowStatus(ctx context.Context, job Job, status, note string) {
+	if !job.WorkflowRequestID.Valid {
+		return
+	}
+	if err := workflow.SetStatus(w.store.db, job.WorkflowRequestID.Int64, status, 0, w.cfg.ID, note); err != nil {
+		slog.ErrorContext(ctx, "migration.workflow_status_update_failed", "job_id", job.ID, "request_id", job.WorkflowRequestID.Int64, "status", status, "error", err)
+	}
 }
 
 // resolveUncertain decides what happened to a job whose COMMIT result is unknown.
 func (w *Worker) resolveUncertain(sctx, logCtx context.Context, job Job) {
+	if job.Mode == ModeBatch {
+		// The checkpoints in the target database are the evidence, and the worker
+		// re-reads them when it runs the job again, so resuming is always safe.
+		if job.Attempt < job.MaxAttempts {
+			w.retry(sctx, logCtx, job, errors.New("previous attempt ended without a known outcome"))
+			return
+		}
+		w.stopBatch(sctx, logCtx, job, errors.New("attempts exhausted after an unknown outcome"))
+		return
+	}
+
 	applied := false
 	if job.Version.Valid {
 		ok, err := w.exec.WasApplied(sctx, job, job.Version.Int64)
@@ -253,6 +315,7 @@ func (w *Worker) resolveUncertain(sctx, logCtx context.Context, job Job) {
 	if applied {
 		if err := w.store.MarkSuccess(sctx, job.ID); err == nil {
 			slog.InfoContext(logCtx, "job.finished", "job_id", job.ID, "status", StatusSuccess, "recovered", true)
+			w.updateWorkflowStatus(logCtx, job, "success", "Execution completed after uncertain commit was verified")
 		}
 		return
 	}

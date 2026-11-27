@@ -40,9 +40,19 @@ type DBConnectionItem struct {
 }
 
 type GroupItem struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	MemberCount int    `json:"memberCount"`
+	ID             int
+	Name           string
+	MemberCount    int
+	LeaderID       int
+	LeaderName     string
+	LeaderIsMember bool
+	Members        []GroupMemberItem
+}
+
+type GroupMemberItem struct {
+	ID       int
+	Username string
+	Name     string
 }
 
 type UserItem struct {
@@ -98,27 +108,76 @@ type TableSummary struct {
 }
 
 type MigrationHistoryItem struct {
-	Version    string `json:"version"`
-	Name       string `json:"name"`
-	ExecutedBy string `json:"executedBy"`
-	ExecutedAt string `json:"executedAt"`
-	Status     string `json:"status"`
-	SQL        string `json:"sql"`
+	ExecutionID        int64
+	Version            string
+	MigrationID        int64
+	JobID              string
+	RequestID          string
+	Revision           int
+	Name               string
+	ExecutedBy         string
+	ExecutedAt         string
+	Status             string
+	SQL                string
+	ExecutedSQL        string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	Action             string
+	TargetExecutionID  int64
+	CanRollback        bool
+	CanForward         bool
 }
 
 type DatabaseDetailData struct {
 	BaseData
-	Database      DatabaseItem           `json:"database"`
-	Tables        []TableSummary         `json:"tables"`
-	SelectedTable string                 `json:"selectedTable"`
-	Columns       []ColumnItem           `json:"columns"`
-	Constraints   []ConstraintItem       `json:"constraints"`
-	Indexes       []IndexItem            `json:"indexes"`
-	DataHeaders   []string               `json:"dataHeaders"`
-	DataRows      [][]string             `json:"dataRows"`
-	Migrations    []MigrationHistoryItem `json:"migrations"`
-	ActiveTab     string                 `json:"activeTab"`
-	Error         string                 `json:"error"`
+	Database       DatabaseItem
+	Tables         []TableSummary
+	SelectedTable  string
+	Columns        []ColumnItem
+	Constraints    []ConstraintItem
+	Indexes        []IndexItem
+	DataHeaders    []string
+	DataRows       [][]string
+	Migrations     []MigrationHistoryItem
+	ChangeRequests []MigrationChangeRequestItem
+	ActiveTab      string
+	Error          string
+}
+
+type MigrationChangeRequestItem struct {
+	ID                 int64
+	Action             string
+	RequesterName      string
+	Status             string
+	TargetExecutionID  int64
+	SQLUp              string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	Mode               string
+	BatchSize          int
+	BatchTable         string
+	BatchColumn        string
+	Error              string
+	CreatedAt          string
+	Approvals          []MigrationApprovalItem
+	Events             []MigrationWorkflowEventItem
+}
+
+type MigrationWorkflowEventItem struct {
+	Status     string
+	ActorName  string
+	Note       string
+	OccurredAt string
+}
+
+type MigrationApprovalItem struct {
+	GroupName  string
+	LeaderName string
+	Decision   string
+	Comment    string
+	CanRespond bool
 }
 
 //go:embed templates/*.html
