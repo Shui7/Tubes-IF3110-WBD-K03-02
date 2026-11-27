@@ -10,8 +10,11 @@ export async function renderConnectionsTab() {
 
     let headerDiv = document.createElement("div")
     headerDiv.classList.add("page-header", "text-center")
-    headerDiv.append(document.createElement("h2").appendChild(document.createTextNode("PostgreSQL Database Connections")))
     connectionsTab.append(headerDiv)
+    
+    let headerText = document.createElement("h2")
+    headerText.appendChild(document.createTextNode("PostgreSQL Database Connections"))
+    headerDiv.append(headerText)
 
     let errorDiv = createErrorDiv()
     let successDiv = createSuccessDiv()

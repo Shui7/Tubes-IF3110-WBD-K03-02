@@ -48,10 +48,13 @@ export async function renderErrorView(errorCode, errorTitle, errorMessage) {
     errorContainer.classList.add("narrow")
     container.append(errorContainer)
 
-    let titleDiv = document.createElement("div")
-    titleDiv.classList.add("page-header", "text-center")
-    titleDiv.append(document.createElement("h1").appendChild(document.createTextNode(errorCode + "—" + errorTitle)))
-    errorContainer.append(titleDiv)
+    let headerDiv = document.createElement("div")
+    headerDiv.classList.add("page-header", "text-center")
+    errorContainer.append(headerDiv)
+    
+    let headerText = document.createElement("h1")
+    headerText.appendChild(document.createTextNode(errorCode + "—" + errorTitle))
+    headerDiv.append(headerText)
 
     let formCard = document.createElement("div")
     formCard.classList.add("form-card")

@@ -19,10 +19,13 @@ export async function renderLoginView() {
     loginContainer.classList.add("narrow")
     container.append(loginContainer)
 
-    let titleDiv = document.createElement("div")
-    titleDiv.classList.add("page-header", "text-center")
-    titleDiv.append(document.createElement("h1").appendChild(document.createTextNode("Sign In")))
-    loginContainer.append(titleDiv)
+    let headerDiv = document.createElement("div")
+    headerDiv.classList.add("page-header", "text-center")
+    loginContainer.append(headerDiv)
+    
+    let headerText = document.createElement("h1")
+    headerText.appendChild(document.createTextNode("Sign In"))
+    headerDiv.append(headerText)
 
     let errorDiv = createErrorDiv()
     loginContainer.append(errorDiv)

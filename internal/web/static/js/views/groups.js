@@ -16,8 +16,11 @@ export async function renderGroupsTab() {
 async function renderGroupsTable(groupsTab) {
     let headerDiv = document.createElement("div")
     headerDiv.classList.add("page-header", "text-center")
-    headerDiv.append(document.createElement("h2").appendChild(document.createTextNode("User Groups")))
     groupsTab.append(headerDiv)
+    
+    let headerText = document.createElement("h2")
+    headerText.appendChild(document.createTextNode("User Groups"))
+    headerDiv.append(headerText)
 
     let errorDiv = createErrorDiv()
     let successDiv = createSuccessDiv()
@@ -182,8 +185,11 @@ async function renderGroupsTable(groupsTab) {
 async function renderPermissionsTable(groupsTab) {
     let headerDiv = document.createElement("div")
     headerDiv.classList.add("page-header", "text-center")
-    headerDiv.append(document.createElement("h2").appendChild(document.createTextNode("Group Permissions")))
     groupsTab.append(headerDiv)
+    
+    let headerText = document.createElement("h2")
+    headerText.appendChild(document.createTextNode("Group Permissions"))
+    headerDiv.append(headerText)
 
     let errorDiv = createErrorDiv()
     let successDiv = createSuccessDiv()

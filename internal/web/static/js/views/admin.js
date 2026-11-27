@@ -16,10 +16,13 @@ export async function renderAdminView() {
     const container = document.getElementById("content")
     container.innerHTML = "";    
 
-    let titleDiv = document.createElement("div")
-    titleDiv.classList.add("page-header", "text-center")
-    titleDiv.append(document.createElement("h1").appendChild(document.createTextNode("Platform Administration")))
-    container.append(titleDiv)
+    let headerDiv = document.createElement("div")
+    headerDiv.classList.add("page-header", "text-center")
+    container.append(headerDiv)
+    
+    let headerText = document.createElement("h1")
+    headerText.appendChild(document.createTextNode("Platform Administration"))
+    headerDiv.append(headerText)
 
     const response = await fetch('/api/auth/me');
     const data = await response.json().catch({"name": "", "role": "", "inSession": false})

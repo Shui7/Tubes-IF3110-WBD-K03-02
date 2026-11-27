@@ -11,8 +11,11 @@ export async function renderUsersTab() {
 
     let headerDiv = document.createElement("div")
     headerDiv.classList.add("page-header", "text-center")
-    headerDiv.append(document.createElement("h2").appendChild(document.createTextNode("Platform Users")))
     usersTab.append(headerDiv)
+    
+    let headerText = document.createElement("h1")
+    headerText.appendChild(document.createTextNode("Platform Users"))
+    headerDiv.append(headerText)
 
     let errorDiv = createErrorDiv()
     let successDiv = createSuccessDiv()
