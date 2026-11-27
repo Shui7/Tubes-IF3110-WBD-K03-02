@@ -13,7 +13,7 @@ export async function renderAdminView() {
 
     setTitle("Platform Administration")
     await renderLoading()
-    awaitrenderNavRight()
+    await renderNavRight()
 
     const container = document.getElementById("content")
     container.innerHTML = "";    
