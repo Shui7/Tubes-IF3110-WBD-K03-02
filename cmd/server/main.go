@@ -143,8 +143,6 @@ func main() {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
-
-	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
 	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(jobs.ResumeHandler(jobStore, platformDB)))
 	http.Handle("GET /api/databases/{id}/migrations/visibility", authMiddleware.RequireAuth(http.HandlerFunc(migrationVisibility)))
 	http.Handle("GET /api/databases", authMiddleware.RequireAuth(http.HandlerFunc(apiDatabases)))
