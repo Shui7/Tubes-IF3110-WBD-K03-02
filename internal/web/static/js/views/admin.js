@@ -37,6 +37,7 @@ export async function renderAdminView() {
 
     let adminTabs = document.createElement("div")
     adminTabs.classList.add("tabs")
+    container.append(adminTabs)
 
     let connectionsTab = document.createElement("a")
     connectionsTab.classList.add("tab-link")
