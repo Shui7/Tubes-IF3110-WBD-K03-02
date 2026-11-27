@@ -103,6 +103,10 @@ type TableSummary struct {
 type MigrationHistoryItem struct {
 	ExecutionID        int64
 	Version            string
+	MigrationID        int64
+	JobID              string
+	RequestID          string
+	Revision           int
 	Name               string
 	ExecutedBy         string
 	ExecutedAt         string

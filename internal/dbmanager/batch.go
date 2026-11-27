@@ -168,6 +168,10 @@ func (m *Manager) RecordMigrationSuccess(ctx context.Context, version int64, mig
 // RecordMigrationSuccessDefinition writes the history row for a migration whose
 // data was changed by batches. It is idempotent for the same immutable definition.
 func (m *Manager) RecordMigrationSuccessDefinition(ctx context.Context, version int64, migrationSQL, sqlDown string, irreversible bool, irreversibleReason, executedBy string) error {
+	return m.RecordMigrationSuccessDefinitionWithMetadata(ctx, version, migrationSQL, sqlDown, irreversible, irreversibleReason, executedBy, MigrationMetadata{})
+}
+
+func (m *Manager) RecordMigrationSuccessDefinitionWithMetadata(ctx context.Context, version int64, migrationSQL, sqlDown string, irreversible bool, irreversibleReason, executedBy string, metadata MigrationMetadata) error {
 	if version < 1 {
 		return errors.New("migration version must be positive")
 	}
@@ -205,7 +209,7 @@ func (m *Manager) RecordMigrationSuccessDefinition(ctx context.Context, version 
 	var oldIrreversible bool
 	var oldReason sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT sql_text, sql_down, is_irreversible, irreversible_reason
-		FROM db_platform_migrations WHERE version=$1 ORDER BY id LIMIT 1`, version).
+		FROM db_platform_migrations WHERE version=$1 AND status='success' ORDER BY id LIMIT 1`, version).
 		Scan(&oldUp, &oldDown, &oldIrreversible, &oldReason)
 	if err == nil {
 		if oldUp != migrationSQL || oldDown != sqlDown || oldIrreversible != irreversible || oldReason.String != irreversibleReason {
@@ -232,9 +236,10 @@ func (m *Manager) RecordMigrationSuccessDefinition(ctx context.Context, version 
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO db_platform_migrations
-			(version, sql_text, executed_sql, sql_down, is_irreversible, irreversible_reason, executed_by, status)
-		VALUES ($1, $2, $2, $3, $4, NULLIF($5,''), $6, 'success')`,
-		version, migrationSQL, sqlDown, irreversible, irreversibleReason, executedBy); err != nil {
+			(version, sql_text, executed_sql, sql_down, is_irreversible, irreversible_reason, migration_id, job_id, request_id, revision, executed_by, status)
+		VALUES ($1, $2, $2, $3, $4, NULLIF($5,''), $6, NULLIF($7,''), NULLIF($8,''), $9, $10, 'success')`,
+		version, migrationSQL, sqlDown, irreversible, irreversibleReason, metadata.MigrationID, metadata.JobID.String,
+		metadata.RequestID, migrationRevision(metadata), executedBy); err != nil {
 		return fmt.Errorf("record migration %d: %w", version, err)
 	}
 	if err := tx.Commit(); err != nil {

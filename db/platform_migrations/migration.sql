@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS db_platform_migrations (
     irreversible_reason TEXT,
     action TEXT NOT NULL DEFAULT 'up',
     target_execution_id BIGINT,
+    migration_id BIGINT,
+    job_id TEXT,
+    request_id TEXT,
+    revision INT NOT NULL DEFAULT 1,
     executed_by TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
     error_message TEXT,
@@ -20,6 +24,10 @@ ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS is_irreversible BOOL
 ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS irreversible_reason TEXT;
 ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'up';
 ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS target_execution_id BIGINT;
+ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS migration_id BIGINT;
+ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS job_id TEXT;
+ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE db_platform_migrations ADD COLUMN IF NOT EXISTS revision INT NOT NULL DEFAULT 1;
 UPDATE db_platform_migrations SET executed_sql = sql_text WHERE executed_sql = '';
 UPDATE db_platform_migrations
 SET irreversible_reason = 'Legacy migration predates stored SQL down definitions.'

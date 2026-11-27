@@ -152,6 +152,9 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 		observability.RecordError(valSpan, err)
 		valSpan.End()
 		slog.WarnContext(ctx, "revalidation.result", "job_id", job.ID, "ok", false, "error", err)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		w.recordFailure(sctx, job, err)
+		cancel()
 		w.fail(ctx, job, err)
 		return
 	}

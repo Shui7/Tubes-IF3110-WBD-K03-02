@@ -72,9 +72,15 @@ func TestMigrationSuccessAndRollback(t *testing.T) {
 
 	failedVersion := version + 1
 	rollbackTable := table + "_rollback"
-	if err := manager.ExecuteMigration(ctx, failedVersion,
+	failedMetadata := MigrationMetadata{
+		MigrationID: sql.NullInt64{Int64: 123, Valid: true},
+		JobID:       sql.NullString{String: "failed-job", Valid: true},
+		RequestID:   "failed-request",
+		Revision:    1,
+	}
+	if err := manager.ExecuteMigrationDefinitionWithMetadata(ctx, failedVersion,
 		`CREATE TABLE "`+rollbackTable+`" (id INTEGER); INSERT INTO "`+rollbackTable+`" (missing_column) VALUES (1)`,
-		"integration"); err == nil {
+		"", true, "integration failure", "integration", failedMetadata); err == nil {
 		t.Fatal("invalid migration unexpectedly succeeded")
 	}
 
@@ -97,9 +103,39 @@ func TestMigrationSuccessAndRollback(t *testing.T) {
 		t.Fatalf("failed migration status = %q, want failed", status)
 	}
 
-	if err := manager.ExecuteMigration(ctx, failedVersion,
-		`CREATE TABLE "`+retryTable+`" (id INTEGER PRIMARY KEY)`, "integration"); err != nil {
+	var migrationID int64
+	var jobID, requestID string
+	var revision int
+	if err := db.QueryRowContext(ctx, `SELECT migration_id, job_id, request_id, revision FROM db_platform_migrations WHERE version=$1 AND status='failed'`, failedVersion).
+		Scan(&migrationID, &jobID, &requestID, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if migrationID != failedMetadata.MigrationID.Int64 || jobID != failedMetadata.JobID.String ||
+		requestID != failedMetadata.RequestID || revision != failedMetadata.Revision {
+		t.Fatalf("failed attempt metadata = %d/%s/%s/%d, want %d/%s/%s/%d",
+			migrationID, jobID, requestID, revision, failedMetadata.MigrationID.Int64,
+			failedMetadata.JobID.String, failedMetadata.RequestID, failedMetadata.Revision)
+	}
+
+	successMetadata := MigrationMetadata{
+		MigrationID: sql.NullInt64{Int64: 124, Valid: true},
+		JobID:       sql.NullString{String: "retry-job", Valid: true},
+		RequestID:   "retry-request",
+		Revision:    2,
+	}
+	if err := manager.ExecuteMigrationDefinitionWithMetadata(ctx, failedVersion,
+		`CREATE TABLE "`+retryTable+`" (id INTEGER PRIMARY KEY)`, "", true, "integration retry",
+		"integration", successMetadata); err != nil {
 		t.Fatalf("retry failed migration version: %v", err)
+	}
+	success, err := manager.GetMigration(ctx, failedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if success.Status != "success" || success.MigrationID.Int64 != successMetadata.MigrationID.Int64 ||
+		success.JobID.String != successMetadata.JobID.String || success.RequestID.String != successMetadata.RequestID ||
+		success.Revision != successMetadata.Revision {
+		t.Fatalf("successful retry metadata = %+v, want %+v", success, successMetadata)
 	}
 }
 

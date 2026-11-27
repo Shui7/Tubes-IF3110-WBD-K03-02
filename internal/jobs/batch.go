@@ -65,7 +65,7 @@ func (e *ManagerExecutor) Complete(ctx context.Context, job Job, version int64) 
 	if err != nil {
 		return err
 	}
-	return m.RecordMigrationSuccessDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy)
+	return m.RecordMigrationSuccessDefinitionWithMetadata(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy, migrationMetadata(job))
 }
 
 // validateBatchRequest checks the mode and batch settings of an enqueue request.
@@ -257,6 +257,7 @@ func (w *Worker) finishBatch(ctx, jobCtx context.Context, job Job, p BatchProgre
 // stopBatch ends a batch job that cannot continue on its own: 'partial' when at
 // least one batch is committed (the user can resume), 'failed' otherwise.
 func (w *Worker) stopBatch(sctx, logCtx context.Context, job Job, cause error) {
+	w.recordFailure(sctx, job, cause)
 	if job.BatchesCommitted == 0 {
 		w.fail(sctx, job, cause)
 		return
@@ -269,4 +270,18 @@ func (w *Worker) stopBatch(sctx, logCtx context.Context, job Job, cause error) {
 	slog.ErrorContext(logCtx, "job.partial", "job_id", job.ID, "batches", job.BatchesCommitted,
 		"rows", job.RowsCommitted, "sqlstate", SQLState(cause), "error", cause)
 	w.updateWorkflowStatus(logCtx, job, "partial", msg)
+}
+
+func (w *Worker) recordFailure(ctx context.Context, job Job, cause error) {
+	recorder, ok := w.exec.(FailureRecorder)
+	if !ok {
+		return
+	}
+	version := int64(0)
+	if job.Version.Valid {
+		version = job.Version.Int64
+	}
+	if err := recorder.RecordFailure(ctx, job, version, cause); err != nil {
+		slog.ErrorContext(ctx, "migration.failure_history_record_failed", "job_id", job.ID, "error", err)
+	}
 }

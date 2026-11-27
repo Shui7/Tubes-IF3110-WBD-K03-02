@@ -2,6 +2,7 @@ package dbmanager
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 )
@@ -32,6 +33,27 @@ func TestValidateIdentifier(t *testing.T) {
 func TestQuoteIdentifier(t *testing.T) {
 	if got, want := quoteIdentifier(`table"name`), `"table""name"`; got != want {
 		t.Fatalf("quoteIdentifier() = %q, want %q", got, want)
+	}
+}
+
+func TestHiddenBySuccessfulRollbackUsesExactExecutionIDs(t *testing.T) {
+	migrations := []Migration{
+		{ExecutionID: 2, Version: 1, Action: "up", Status: "success"},
+		{ExecutionID: 3, Version: 1, Action: "rollback", Status: "failed", TargetExecutionID: sql.NullInt64{Int64: 2, Valid: true}},
+		{ExecutionID: 4, Version: 1, Action: "rollback", Status: "success", TargetExecutionID: sql.NullInt64{Int64: 2, Valid: true}},
+		{ExecutionID: 5, Version: 1, Action: "forward", Status: "success", TargetExecutionID: sql.NullInt64{Int64: 4, Valid: true}},
+		{ExecutionID: 6, Version: 2, Action: "rollback", Status: "success"},
+	}
+
+	got := HiddenBySuccessfulRollback(migrations)
+	want := []int64{2, 4, 6}
+	if len(got) != len(want) {
+		t.Fatalf("hidden execution IDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("hidden execution IDs = %v, want %v", got, want)
+		}
 	}
 }
 

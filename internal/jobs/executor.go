@@ -33,6 +33,10 @@ type Validator interface {
 	Validate(ctx context.Context, job Job) error
 }
 
+type FailureRecorder interface {
+	RecordFailure(ctx context.Context, job Job, version int64, cause error) error
+}
+
 // NoopValidator accepts everything.
 type NoopValidator struct{}
 
@@ -58,7 +62,7 @@ func (e *ManagerExecutor) Execute(ctx context.Context, job Job, version int64) e
 	}
 	switch job.Kind {
 	case "", "up":
-		return m.ExecuteMigrationDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy)
+		return m.ExecuteMigrationDefinitionWithMetadata(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy, migrationMetadata(job))
 	case "rollback":
 		if !job.TargetExecutionID.Valid {
 			return errors.New("queued rollback has no target execution ID")
@@ -70,7 +74,7 @@ func (e *ManagerExecutor) Execute(ctx context.Context, job Job, version int64) e
 		if target.SQLDown != job.SQL {
 			return errors.New("queued rollback SQL differs from the immutable migration definition")
 		}
-		return m.RollbackMigration(ctx, job.TargetExecutionID.Int64, job.RequestedBy)
+		return m.RollbackMigrationWithMetadata(ctx, job.TargetExecutionID.Int64, job.RequestedBy, migrationMetadata(job))
 	case "forward":
 		if !job.TargetExecutionID.Valid {
 			return errors.New("queued forward has no target execution ID")
@@ -82,25 +86,60 @@ func (e *ManagerExecutor) Execute(ctx context.Context, job Job, version int64) e
 		if target.SQL != job.SQL {
 			return errors.New("queued forward SQL differs from the immutable migration definition")
 		}
-		return m.ForwardMigration(ctx, job.TargetExecutionID.Int64, job.RequestedBy)
+		return m.ForwardMigrationWithMetadata(ctx, job.TargetExecutionID.Int64, job.RequestedBy, migrationMetadata(job))
 	default:
 		return fmt.Errorf("unsupported migration job kind %q", job.Kind)
 	}
 }
 
-// WasApplied checks whether a successful migration with the same version
-// and SQL has already been recorded.
-// TODO: check execution_id once history has it.
+func (e *ManagerExecutor) RecordFailure(ctx context.Context, job Job, version int64, cause error) error {
+	m, err := e.Registry.Get(ctx, job.DatabaseID)
+	if err != nil {
+		return err
+	}
+	if job.Kind == "rollback" || job.Kind == "forward" {
+		if !job.TargetExecutionID.Valid {
+			return errors.New("failed migration action has no target execution ID")
+		}
+		return m.RecordMigrationActionFailure(ctx, job.TargetExecutionID.Int64, job.Kind, job.RequestedBy, cause.Error(), migrationMetadata(job))
+	}
+	if version < 1 {
+		version, err = m.NextMigrationVersion(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return m.RecordMigrationFailureDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible,
+		job.IrreversibleReason, job.RequestedBy, cause.Error(), migrationMetadata(job))
+}
+
+func migrationMetadata(job Job) dbmanager.MigrationMetadata {
+	return dbmanager.MigrationMetadata{
+		MigrationID: job.WorkflowRequestID,
+		JobID:       sql.NullString{String: job.ID, Valid: job.ID != ""},
+		RequestID:   job.RequestID,
+		Revision:    job.Attempt,
+	}
+}
+
+// WasApplied checks the history row linked to this job, with compatibility
+// fallbacks for history written before job IDs were stored.
 func (e *ManagerExecutor) WasApplied(ctx context.Context, job Job, version int64) (bool, error) {
 	m, err := e.Registry.Get(ctx, job.DatabaseID)
 	if err != nil {
 		return false, err
 	}
-	if job.Kind == "rollback" || job.Kind == "forward" {
-		migrations, err := m.ListMigrations(ctx)
-		if err != nil {
-			return false, err
+	migrations, err := m.ListMigrations(ctx)
+	if err != nil {
+		return false, err
+	}
+	for i := len(migrations) - 1; i >= 0; i-- {
+		migration := migrations[i]
+		if migration.Version == version && migration.JobID.Valid && migration.JobID.String == job.ID {
+			return migration.Status == "success", nil
 		}
+	}
+	if job.Kind == "rollback" || job.Kind == "forward" {
 		for i := len(migrations) - 1; i >= 0; i-- {
 			migration := migrations[i]
 			if migration.Version == version && migration.Action == job.Kind && migration.TargetExecutionID.Valid && job.TargetExecutionID.Valid && migration.TargetExecutionID.Int64 == job.TargetExecutionID.Int64 {

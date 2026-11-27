@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -129,6 +130,7 @@ func main() {
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
 	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(
 		requireCSRFHeader(jobs.ResumeHandler(jobStore, canViewDatabase, canEditDatabase))))
+	http.Handle("GET /api/databases/{id}/migrations/visibility", authMiddleware.RequireAuth(http.HandlerFunc(migrationVisibility)))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
@@ -432,15 +434,33 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 	if mode == "" {
 		mode = jobs.ModePlain
 	}
+	logValidation := func(stage string, validationErr error, fields ...any) {
+		args := []any{
+			"database_id", id, "user_id", session.UserID, "action", action,
+			"mode", mode, "validation_stage", stage,
+		}
+		args = append(args, fields...)
+		if validationErr != nil {
+			args = append(args, "ok", false, "error", validationErr)
+			slog.WarnContext(r.Context(), "migration.validation.failed", args...)
+			return
+		}
+		args = append(args, "ok", true)
+		slog.InfoContext(r.Context(), "migration.validation.passed", args...)
+	}
 	if action != "up" && mode != jobs.ModePlain {
-		http.Redirect(w, r, back+"?error="+url.QueryEscape("rollback and forward must use plain mode")+"#migrations", http.StatusSeeOther)
+		err := errors.New("rollback and forward must use plain mode")
+		logValidation("request_options", err)
+		http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
 	batchSize := 0
 	if raw := strings.TrimSpace(r.FormValue("batch_size")); raw != "" {
 		parsed, parseErr := strconv.Atoi(raw)
 		if parseErr != nil {
-			http.Redirect(w, r, back+"?error="+url.QueryEscape("batch size must be a number")+"#migrations", http.StatusSeeOther)
+			err := errors.New("batch size must be a number")
+			logValidation("batch_options", err)
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
 		batchSize = parsed
@@ -457,38 +477,89 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 		var parseErr error
 		targetID, parseErr = strconv.ParseInt(r.FormValue("execution_id"), 10, 64)
 		if parseErr != nil || targetID < 1 {
-			http.Redirect(w, r, back+"?error="+url.QueryEscape("invalid target execution ID")+"#migrations", http.StatusSeeOther)
+			err := errors.New("invalid target execution ID")
+			logValidation("action_target", err)
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
 		manager, _, openErr := openManagedDatabase(r.Context(), id)
 		if openErr != nil {
+			logValidation("action_target_database", openErr, "target_execution_id", targetID)
 			http.Redirect(w, r, back+"?error="+url.QueryEscape(openErr.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
-		target, loadErr := manager.GetMigrationExecution(r.Context(), targetID)
+		target, loadErr := manager.ValidateMigrationAction(r.Context(), targetID, action)
 		_ = manager.Close()
 		if loadErr != nil {
+			logValidation("action_eligibility", loadErr, "target_execution_id", targetID)
 			http.Redirect(w, r, back+"?error="+url.QueryEscape(loadErr.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
+		logValidation("action_eligibility", nil, "target_execution_id", targetID, "migration_version", target.Version)
+
 		sqlUp, sqlDown = target.SQL, target.SQLDown
 		irreversible, reason = target.Irreversible, nullStringValue(target.IrreversibleReason)
 	}
 	if mode == jobs.ModeBatch {
 		if err := jobs.ValidateBatchRequest(mode, batchSize, sqlUp, batchTable, batchColumn); err != nil {
+			logValidation("batch_definition", err, "sql_bytes", len(sqlUp), "batch_size", batchSize)
 			http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
+		logValidation("batch_definition", nil, "sql_bytes", len(sqlUp), "batch_size", batchSize)
 	}
 	request, err := workflow.CreateRequest(platformDB, id, session.UserID, session.Name, action, sqlUp, sqlDown, irreversible, reason, targetID, mode, batchSize, batchTable, batchColumn)
 	if err != nil {
+		logValidation("approval_request", err, "sql_bytes", len(sqlUp), "irreversible", irreversible)
 		slog.WarnContext(r.Context(), "migration.request_rejected", "database_id", id, "action", action, "user_id", session.UserID, "error", err)
 		http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
+	logValidation("approval_request", nil, "request_id", request.ID, "sql_bytes", len(sqlUp),
+		"irreversible", irreversible, "sql_validation", "deferred_until_execution")
 	slog.InfoContext(r.Context(), "migration.requested", "request_id", request.ID, "database_id", id, "action", action, "user_id", session.UserID, "user", session.Name, "target_execution_id", targetID)
 	message := fmt.Sprintf("Migration change request #%d submitted for group leader approval.", request.ID)
 	http.Redirect(w, r, back+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func migrationVisibility(w http.ResponseWriter, r *http.Request) {
+	databaseID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || databaseID < 1 {
+		http.Error(w, "invalid database ID", http.StatusBadRequest)
+		return
+	}
+	if !canViewDatabase(r, databaseID) {
+		http.Error(w, "database not found", http.StatusNotFound)
+		return
+	}
+	hideRollback, err := strconv.ParseBool(r.URL.Query().Get("hide_rollback"))
+	if err != nil {
+		http.Error(w, "hide_rollback must be true or false", http.StatusBadRequest)
+		return
+	}
+	manager, _, err := openManagedDatabase(r.Context(), databaseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "migration.visibility_load_failed", "database_id", databaseID, "error", err)
+		http.Error(w, "unable to load migration history", http.StatusInternalServerError)
+		return
+	}
+	defer manager.Close()
+	migrations, err := manager.ListMigrations(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "migration.visibility_load_failed", "database_id", databaseID, "error", err)
+		http.Error(w, "unable to load migration history", http.StatusInternalServerError)
+		return
+	}
+	hiddenExecutionIDs := []int64{}
+	if hideRollback {
+		hiddenExecutionIDs = dbmanager.HiddenBySuccessfulRollback(migrations)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(struct {
+		HiddenExecutionIDs []int64 `json:"hidden_execution_ids"`
+	}{HiddenExecutionIDs: hiddenExecutionIDs}); err != nil {
+		slog.ErrorContext(r.Context(), "migration.visibility_response_failed", "database_id", databaseID, "error", err)
+	}
 }
 
 func envPositiveInt(key string, def int) int {
@@ -638,7 +709,7 @@ func executeApprovedMigration(ctx context.Context, request workflow.Request, app
 			return jobs.Job{}, err
 		}
 		var target dbmanager.Migration
-		target, err = manager.GetMigrationExecution(ctx, request.TargetExecutionID.Int64)
+		target, err = manager.ValidateMigrationAction(ctx, request.TargetExecutionID.Int64, request.Action)
 		_ = manager.Close()
 		if err != nil {
 			_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
@@ -760,7 +831,9 @@ func convertMigrations(migrations []dbmanager.Migration) []web.MigrationHistoryI
 		}
 		result = append(result, web.MigrationHistoryItem{
 			ExecutionID: migration.ExecutionID,
-			Version:     version, Name: "Migration " + version, ExecutedBy: migration.ExecutedBy,
+			MigrationID: migration.MigrationID.Int64, JobID: migration.JobID.String,
+			RequestID: migration.RequestID.String, Revision: migration.Revision,
+			Version: version, Name: "Migration " + version, ExecutedBy: migration.ExecutedBy,
 			ExecutedAt: executedAt, Status: migration.Status, SQL: migration.SQL, ExecutedSQL: migration.ExecutedSQL, Action: migration.Action,
 			SQLDown: migration.SQLDown, Irreversible: migration.Irreversible, IrreversibleReason: nullStringValue(migration.IrreversibleReason),
 			TargetExecutionID: targetExecutionID, CanRollback: canRollback, CanForward: canForward,

@@ -259,6 +259,10 @@
                                 {{ end }}
                                 <details>
                                     <summary>Migration definition</summary>
+                                    {{ if .MigrationID }}<p><strong>Migration request:</strong> #{{ .MigrationID }}</p>{{ end }}
+                                    {{ if .JobID }}<p><strong>Job:</strong> <a href="/api/jobs/{{ .JobID }}">{{ .JobID }}</a></p>{{ end }}
+                                    {{ if .RequestID }}<p><strong>Request ID:</strong> {{ .RequestID }}</p>{{ end }}
+                                    {{ if .Revision }}<p><strong>Revision:</strong> {{ .Revision }}</p>{{ end }}
                                     <p><strong>SQL executed by this attempt</strong></p>
                                     <pre class="mono">{{ .ExecutedSQL }}</pre>
                                     <p><strong>SQL up</strong></p>
@@ -406,21 +410,19 @@
             const hideRollback = document.getElementById('hide-rollback');
             if (!hideRollback) return;
             const historyRows = Array.from(document.querySelectorAll('.migration-history-row'));
-            function updateRollbackFilter() {
-                const hiddenExecutionIDs = new Set();
-                if (hideRollback.checked) {
+            async function updateRollbackFilter() {
+                const url = '/api/databases/{{ .Database.ID }}/migrations/visibility?hide_rollback=' + hideRollback.checked;
+                try {
+                    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                    if (!response.ok) throw new Error('Migration visibility request failed: ' + response.status);
+                    const result = await response.json();
+                    const hiddenExecutionIDs = new Set(result.hidden_execution_ids.map(String));
                     historyRows.forEach(row => {
-                        if (row.dataset.action === 'rollback' && row.dataset.status === 'success') {
-                            hiddenExecutionIDs.add(row.dataset.executionId);
-                            if (row.dataset.targetExecutionId) {
-                                hiddenExecutionIDs.add(row.dataset.targetExecutionId);
-                            }
-                        }
+                        row.hidden = hiddenExecutionIDs.has(row.dataset.executionId);
                     });
+                } catch (error) {
+                    console.error(error);
                 }
-                historyRows.forEach(row => {
-                    row.hidden = hiddenExecutionIDs.has(row.dataset.executionId);
-                });
             }
             hideRollback.addEventListener('change', updateRollbackFilter);
         })();

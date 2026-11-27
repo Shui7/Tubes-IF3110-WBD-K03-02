@@ -61,6 +61,10 @@ type Row map[string]any
 type Migration struct {
 	ExecutionID        int64
 	Version            int64
+	MigrationID        sql.NullInt64
+	JobID              sql.NullString
+	RequestID          sql.NullString
+	Revision           int
 	SQL                string
 	ExecutedSQL        string
 	SQLDown            string
@@ -72,6 +76,13 @@ type Migration struct {
 	Status             string
 	Error              sql.NullString
 	ExecutedAt         sql.NullTime
+}
+
+type MigrationMetadata struct {
+	MigrationID sql.NullInt64 // ID of the workflow migration request
+	JobID       sql.NullString
+	RequestID   string
+	Revision    int // worker attempt number
 }
 
 type Manager struct {
