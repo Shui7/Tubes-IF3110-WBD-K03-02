@@ -58,7 +58,7 @@ export async function renderLoginView() {
 
     let passwordLabel = document.createElement("label")
     passwordLabel.htmlFor = "password"
-    passwordLabel.textContent = "password"
+    passwordLabel.textContent = "Password"
     let passwordInput = document.createElement("input")
     passwordInput.id = "password"
     passwordInput.type = "password"

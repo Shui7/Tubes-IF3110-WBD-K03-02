@@ -299,41 +299,6 @@ async function renderPermissionsTable(groupsTab) {
     grantPermissionForm.action = "/admin/permissions/grant"
     grantPermissionFormCard.append(grantPermissionForm)
 
-    /**
-     * <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-                        <div class="form-group">
-                            <label for="perm_group">Target Group</label>
-                            <select id="perm_group" name="group_id" required>
-                                <option value="">-- Select Group --</option>
-                                {{ range .Groups }}
-                                <option value="{{ .ID }}">{{ .Name }}</option>
-                                {{ end }}
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="perm_db">Target Database</label>
-                            <select id="perm_db" name="database_id" required>
-                                <option value="">-- Select Database --</option>
-                                {{ range .Connections }}
-                                <option value="{{ .ID }}">{{ .Database }}</option>
-                                {{ end }}
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="perm_access">Access Level</label>
-                            <select id="perm_access" name="access_level" required>
-                                <option value="view">View Only (Schema, Data, History)</option>
-                                <option value="edit">View + Edit (Migrations, DDL, DML)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Grant Access</button>
-                    </div>
-     */
     let formGridDiv = document.createElement("div")
     formGridDiv.style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;"
     grantPermissionForm.append(formGridDiv)
@@ -423,9 +388,11 @@ async function renderPermissionsTable(groupsTab) {
         errorDiv.hidden = true
         successDiv.hidden = true
 
-        const groupName = groupNameInput.value.trim();
+        const selectedGroupId = groupSelect.value;
+        const selectedDatabaseId = dbSelect.value;
+        const selectedAccessLevel = accessSelect.value;
 
-        if (!groupName) {
+        if (!selectedGroupId || !selectedDatabaseId || !selectedAccessLevel) {
             errorDiv.textContent = "All fields are required."
             errorDiv.hidden = false
             return
@@ -437,7 +404,9 @@ async function renderPermissionsTable(groupsTab) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                name: groupName
+                group_id: selectedGroupId,
+                database_id: selectedDatabaseId,
+                access_level: selectedAccessLevel
             })
         })
         
