@@ -114,51 +114,71 @@ func DeleteUser(db *sql.DB, id int) error {
 
 func HandleAddUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+	type addUserRequest struct {
+		Username string   `json:"username"`
+		Fullname string   `json:"fullname"`
+		Password string   `json:"password"`
+		Role     string   `json:"role"`
+		Groups   []string `json:"groups"`
+	}
+	var req addUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	username := strings.TrimSpace(r.FormValue("username"))
-	name := strings.TrimSpace(r.FormValue("fullname"))
-	if name == "" {
-		name = strings.TrimSpace(r.FormValue("name"))
-	}
+	username := strings.TrimSpace(req.Username)
+	name := strings.TrimSpace(req.Fullname)
 	if name == "" {
 		name = username
 	}
-	password := r.FormValue("password")
-	role := strings.TrimSpace(r.FormValue("role"))
-	groups := r.Form["groups"]
+	password := req.Password
+	role := strings.TrimSpace(req.Role)
+	groups := req.Groups
 
 	if username != "" && password != "" {
 		if err := AddUser(db, username, name, password, role, groups); err != nil {
 			slog.ErrorContext(r.Context(), "admin.user_add_failed", "error", err)
+			http.Error(w, "Failed to add user", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleDeleteUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	idStr := r.FormValue("id")
+	type deleteUserRequest struct {
+		ID string `json:"id"`
+	}
+	var req deleteUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	idStr := req.ID
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteUser(db, id); err != nil {
 			slog.ErrorContext(r.Context(), "admin.user_delete_failed", "error", err)
+			http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleGetUsers(db *sql.DB, w http.ResponseWriter, r *http.Request) {
@@ -168,7 +188,7 @@ func HandleGetUsers(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(users)
 }

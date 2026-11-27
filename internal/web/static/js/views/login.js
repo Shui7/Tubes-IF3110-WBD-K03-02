@@ -122,7 +122,7 @@ export async function renderLoginView() {
             window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));
         } catch {
-            errorDiv.textContent = "Network error occurred when signing in. Try again.";
+            errorDiv.textContent = "Error occurred when signing in. Try again.";
             errorDiv.hidden = false
             refreshLoginCsrfToken()
         } finally {

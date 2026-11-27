@@ -97,35 +97,59 @@ func DeletePermission(db *sql.DB, id int) error {
 
 func HandleAddGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	name := strings.TrimSpace(r.FormValue("name"))
+	type addGroupRequest struct {
+		Name string `json:"name"`
+	}
+	var req addGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
 	if name != "" {
 		if err := AddGroup(db, name); err != nil {
 			slog.ErrorContext(r.Context(), "admin.group_add_failed", "error", err)
+			http.Error(w, "Failed to create group", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleDeleteGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	idStr := r.FormValue("id")
+	type deleteGroupRequest struct {
+		ID string `json:"id"`
+	}
+	var req deleteGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	idStr := req.ID
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteGroup(db, id); err != nil {
 			slog.ErrorContext(r.Context(), "admin.group_delete_failed", "error", err)
+			http.Error(w, "Failed to delete group", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleGetGroups(db *sql.DB, w http.ResponseWriter, r *http.Request) {
@@ -135,20 +159,31 @@ func HandleGetGroups(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to fetch groups", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(groups)
 }
 
 func HandleGrantPermission(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	groupIDStr := r.FormValue("group_id")
-	databaseIDStr := r.FormValue("database_id")
-	accessLevel := strings.TrimSpace(r.FormValue("access_level"))
+	type grantPermissionRequest struct {
+		GroupID     string `json:"group_id"`
+		DatabaseID  string `json:"database_id"`
+		AccessLevel string `json:"access_level"`
+	}
+	var req grantPermissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	groupIDStr := req.GroupID
+	databaseIDStr := req.DatabaseID
+	accessLevel := strings.TrimSpace(req.AccessLevel)
 
 	groupID, err1 := strconv.Atoi(groupIDStr)
 	databaseID, err2 := strconv.Atoi(databaseIDStr)
@@ -156,27 +191,42 @@ func HandleGrantPermission(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if err1 == nil && err2 == nil && (accessLevel == "view" || accessLevel == "edit") {
 		if err := GrantPermission(db, groupID, databaseID, accessLevel); err != nil {
 			slog.ErrorContext(r.Context(), "admin.permission_grant_failed", "error", err)
+			http.Error(w, "Failed to grant permisssion", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleDeletePermission(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	idStr := r.FormValue("id")
+	type deletePermissionRequest struct {
+		ID string `json:"id"`
+	}
+	var req deletePermissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	idStr := req.ID
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeletePermission(db, id); err != nil {
 			slog.ErrorContext(r.Context(), "admin.permission_delete_failed", "error", err)
+			http.Error(w, "Failed to delete permisssion", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleGetPermissions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
@@ -186,7 +236,7 @@ func HandleGetPermissions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to fetch permissions", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(permissions)
 }

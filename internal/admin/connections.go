@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -120,19 +119,33 @@ func DeleteConnection(db *sql.DB, id int) error {
 
 func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#connections", http.StatusSeeOther)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	database := strings.TrimSpace(r.FormValue("database"))
-	host := strings.TrimSpace(r.FormValue("host"))
-	portStr := strings.TrimSpace(r.FormValue("port"))
-	user := strings.TrimSpace(r.FormValue("user"))
-	password := r.FormValue("password")
+	type connAddRequest struct {
+		Database string `json:"database"`
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		User     string `json:"user"`
+		Password string `json:"password"`
+	}
+
+	var req connAddRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	database := strings.TrimSpace(req.Database)
+	host := strings.TrimSpace(req.Host)
+	portStr := strconv.Itoa(req.Port)
+	user := strings.TrimSpace(req.User)
+	password := req.Password
 
 	if isPlatformDB(database) {
 		slog.WarnContext(r.Context(), "admin.connection_blocked", "database", database)
-		http.Redirect(w, r, "/admin?error=Cannot+register+the+platform's+internal+database+as+a+managed+connection#connections", http.StatusSeeOther)
+		http.Error(w, "Cannot register the platform's internal database as a managed connection", http.StatusForbidden)
 		return
 	}
 
@@ -144,7 +157,7 @@ func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if database != "" && host != "" && user != "" {
 		if err := AddConnection(db, database, host, port, user, password); err != nil {
 			slog.ErrorContext(r.Context(), "admin.connection_add_failed", "error", err)
-			http.Redirect(w, r, "/admin?error="+url.QueryEscape(err.Error())+"#connections", http.StatusSeeOther)
+			http.Error(w, "Failed to add database connection", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -153,20 +166,32 @@ func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 }
 
 func HandleDeleteConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/admin#connections", http.StatusSeeOther)
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	idStr := r.FormValue("id")
+	type connDeleteRequest struct {
+		id string
+	}
+	var req connDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	idStr := req.id
 	id, err := strconv.Atoi(idStr)
 	if err == nil {
 		if err := DeleteConnection(db, id); err != nil {
 			slog.ErrorContext(r.Context(), "admin.connection_delete_failed", "error", err)
+			http.Error(w, "Failed to remove database connection", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	http.Redirect(w, r, "/admin#connections", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleGetConnections(db *sql.DB, w http.ResponseWriter, r *http.Request) {

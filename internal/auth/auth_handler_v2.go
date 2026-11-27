@@ -43,7 +43,7 @@ func NewAuthHandlerAPI(db *sql.DB, sessionStore *SessionStore) *AuthHandlerAPI {
 // "api/auth/login"
 func (h *AuthHandlerAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed: " + r.Method, http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -58,10 +58,8 @@ func (h *AuthHandlerAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req LoginRequest = LoginRequest{
-		Username: r.FormValue("username"),
-		Password: r.FormValue("password"),
-	}
+	var req LoginRequest
+	json.NewDecoder(r.Body).Decode(&req)
 
 	// Ambil user dari database
 	var userID int
