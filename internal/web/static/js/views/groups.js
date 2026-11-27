@@ -1,5 +1,6 @@
 import { fetchConnections } from "./connections.js"
 import { apiFetch } from "./utils.js"
+import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderGroupsTab() {
      const container = document.getElementById("content")
