@@ -40,19 +40,19 @@ type DBConnectionItem struct {
 }
 
 type GroupItem struct {
-	ID             int
-	Name           string
-	MemberCount    int
-	LeaderID       int
-	LeaderName     string
-	LeaderIsMember bool
-	Members        []GroupMemberItem
+	ID             int               `json:"id"`
+	Name           string            `json:"name"`
+	MemberCount    int               `json:"memberCount"`
+	LeaderID       int               `json:"leaderId"`
+	LeaderName     string            `json:"leaderName"`
+	LeaderIsMember bool              `json:"leaderIsMember"`
+	Members        []GroupMemberItem `json:"members"`
 }
 
 type GroupMemberItem struct {
-	ID       int
-	Username string
-	Name     string
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
 }
 
 type UserItem struct {
@@ -108,76 +108,76 @@ type TableSummary struct {
 }
 
 type MigrationHistoryItem struct {
-	ExecutionID        int64
-	Version            string
-	MigrationID        int64
-	JobID              string
-	RequestID          string
-	Revision           int
-	Name               string
-	ExecutedBy         string
-	ExecutedAt         string
-	Status             string
-	SQL                string
-	ExecutedSQL        string
-	SQLDown            string
-	Irreversible       bool
-	IrreversibleReason string
-	Action             string
-	TargetExecutionID  int64
-	CanRollback        bool
-	CanForward         bool
+	ExecutionID        int64  `json:"executionId"`
+	Version            string `json:"version"`
+	MigrationID        int64  `json:"migrationId"`
+	JobID              string `json:"jobId"`
+	RequestID          string `json:"requestId"`
+	Revision           int    `json:"revision"`
+	Name               string `json:"name"`
+	ExecutedBy         string `json:"executedBy"`
+	ExecutedAt         string `json:"executedAt"`
+	Status             string `json:"status"`
+	SQL                string `json:"sql"`
+	ExecutedSQL        string `json:"executedSQL"`
+	SQLDown            string `json:"sqlDown"`
+	Irreversible       bool   `json:"irreversible"`
+	IrreversibleReason string `json:"irreversibleReason"`
+	Action             string `json:"action"`
+	TargetExecutionID  int64  `json:"targetExecutionId"`
+	CanRollback        bool   `json:"canRollback"`
+	CanForward         bool   `json:"canForward"`
 }
 
 type DatabaseDetailData struct {
 	BaseData
-	Database       DatabaseItem
-	Tables         []TableSummary
-	SelectedTable  string
-	Columns        []ColumnItem
-	Constraints    []ConstraintItem
-	Indexes        []IndexItem
-	DataHeaders    []string
-	DataRows       [][]string
-	Migrations     []MigrationHistoryItem
-	ChangeRequests []MigrationChangeRequestItem
-	ActiveTab      string
-	Error          string
+	Database       DatabaseItem                 `json:"database"`
+	Tables         []TableSummary               `json:"tables"`
+	SelectedTable  string                       `json:"selectedTable"`
+	Columns        []ColumnItem                 `json:"columns"`
+	Constraints    []ConstraintItem             `json:"constraints"`
+	Indexes        []IndexItem                  `json:"indexes"`
+	DataHeaders    []string                     `json:"dataHeaders"`
+	DataRows       [][]string                   `json:"dataRows"`
+	Migrations     []MigrationHistoryItem       `json:"migrations"`
+	ChangeRequests []MigrationChangeRequestItem `json:"changeRequests"`
+	ActiveTab      string                       `json:"activeTab"`
+	Error          string                       `json:"error"`
 }
 
 type MigrationChangeRequestItem struct {
-	ID                 int64
-	Action             string
-	RequesterName      string
-	Status             string
-	TargetExecutionID  int64
-	SQLUp              string
-	SQLDown            string
-	Irreversible       bool
-	IrreversibleReason string
-	Mode               string
-	BatchSize          int
-	BatchTable         string
-	BatchColumn        string
-	Error              string
-	CreatedAt          string
-	Approvals          []MigrationApprovalItem
-	Events             []MigrationWorkflowEventItem
+	ID                 int64                        `json:"id"`
+	Action             string                       `json:"action"`
+	RequesterName      string                       `json:"requesterName"`
+	Status             string                       `json:"status"`
+	TargetExecutionID  int64                        `json:"targetExecutionId"`
+	SQLUp              string                       `json:"sqlUp"`
+	SQLDown            string                       `json:"sqlDown"`
+	Irreversible       bool                         `json:"irreversible"`
+	IrreversibleReason string                       `json:"irreversibleReason"`
+	Mode               string                       `json:"mode"`
+	BatchSize          int                          `json:"batchSize"`
+	BatchTable         string                       `json:"batchTable"`
+	BatchColumn        string                       `json:"batchColumn"`
+	Error              string                       `json:"error"`
+	CreatedAt          string                       `json:"createdAt"`
+	Approvals          []MigrationApprovalItem      `json:"approvals"`
+	Events             []MigrationWorkflowEventItem `json:"events"`
 }
 
 type MigrationWorkflowEventItem struct {
-	Status     string
-	ActorName  string
-	Note       string
-	OccurredAt string
+	Status     string `json:"status"`
+	ActorName  string `json:"actorName"`
+	Note       string `json:"note"`
+	OccurredAt string `json:"occurredAt"`
 }
 
 type MigrationApprovalItem struct {
-	GroupName  string
-	LeaderName string
-	Decision   string
-	Comment    string
-	CanRespond bool
+	GroupName  string `json:"groupName"`
+	LeaderName string `json:"leaderName"`
+	Decision   string `json:"decision"`
+	Comment    string `json:"comment"`
+	CanRespond bool   `json:"canRespond"`
 }
 
 //go:embed templates/*.html
