@@ -187,23 +187,15 @@ func HandleDeleteGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type deleteGroupRequest struct {
-		ID string `json:"id"`
-	}
-	var req deleteGroupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	id, err := decodeDeleteID(r)
+	if err != nil {
+		http.Error(w, "Invalid request: id must be a positive integer", http.StatusBadRequest)
 		return
 	}
-
-	idStr := req.ID
-	id, err := strconv.Atoi(idStr)
-	if err == nil {
-		if err := DeleteGroup(db, id); err != nil {
-			slog.ErrorContext(r.Context(), "admin.group_delete_failed", "error", err)
-			http.Error(w, "Failed to delete group", http.StatusInternalServerError)
-			return
-		}
+	if err := DeleteGroup(db, id); err != nil {
+		slog.ErrorContext(r.Context(), "admin.group_delete_failed", "error", err)
+		http.Error(w, "Failed to delete group", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -279,23 +271,15 @@ func HandleDeletePermission(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	type deletePermissionRequest struct {
-		ID string `json:"id"`
-	}
-	var req deletePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	id, err := decodeDeleteID(r)
+	if err != nil {
+		http.Error(w, "Invalid request: id must be a positive integer", http.StatusBadRequest)
 		return
 	}
-
-	idStr := req.ID
-	id, err := strconv.Atoi(idStr)
-	if err == nil {
-		if err := DeletePermission(db, id); err != nil {
-			slog.ErrorContext(r.Context(), "admin.permission_delete_failed", "error", err)
-			http.Error(w, "Failed to delete permisssion", http.StatusInternalServerError)
-			return
-		}
+	if err := DeletePermission(db, id); err != nil {
+		slog.ErrorContext(r.Context(), "admin.permission_delete_failed", "error", err)
+		http.Error(w, "Failed to delete permisssion", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

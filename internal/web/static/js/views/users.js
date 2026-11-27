@@ -1,5 +1,5 @@
 import { fetchGroups } from "./groups.js"
-import { apiFetch, fetchJsonArray } from "./utils.js"
+import { apiFetch, deleteAdminItem, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderUsersTab() {
@@ -117,17 +117,16 @@ export async function renderUsersTab() {
         deleteButton.textContent = "Delete"
         deleteButton.addEventListener("click", async function (event) {
             event.preventDefault()
-            const response = await apiFetch('/api/admin/users/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id: user.id
-                })
-            })
-            if (response.ok) {
-                renderUsersTab()
+            deleteButton.disabled = true
+            errorDiv.hidden = true
+            try {
+                await deleteAdminItem("/api/admin/users/delete", user.id)
+                await renderUsersTab()
+            } catch (error) {
+                errorDiv.textContent = `Unable to delete user: ${error.message}`
+                errorDiv.hidden = false
+            } finally {
+                deleteButton.disabled = false
             }
         })
         tableDataActions.append(deleteButton)

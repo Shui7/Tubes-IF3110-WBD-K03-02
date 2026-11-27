@@ -44,6 +44,18 @@ export async function fetchJsonArray(url) {
     return data;
 }
 
+export async function deleteAdminItem(url, id) {
+    const response = await apiFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+    })
+    if (!response.ok) {
+        const message = (await response.text()).trim()
+        throw new Error(message || `Request failed (${response.status})`)
+    }
+}
+
 export async function renderLoading() {
     const container = document.getElementById("content")
     container.innerHTML = ""

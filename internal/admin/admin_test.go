@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,6 +48,40 @@ func TestHandleAddUserValidation(t *testing.T) {
 
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("expected status 303 for GET request, got %d", w.Code)
+	}
+}
+
+func TestDecodeDeleteID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/delete", strings.NewReader(`{"id":42}`))
+	id, err := decodeDeleteID(req)
+	if err != nil {
+		t.Fatalf("decodeDeleteID returned error: %v", err)
+	}
+	if id != 42 {
+		t.Fatalf("decoded ID = %d, want 42", id)
+	}
+}
+
+func TestDeleteHandlersRejectInvalidID(t *testing.T) {
+	handlers := []struct {
+		name    string
+		handler func(*sql.DB, http.ResponseWriter, *http.Request)
+	}{
+		{name: "connection", handler: HandleDeleteConnection},
+		{name: "group", handler: HandleDeleteGroup},
+		{name: "permission", handler: HandleDeletePermission},
+		{name: "user", handler: HandleDeleteUser},
+	}
+
+	for _, test := range handlers {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/delete", strings.NewReader(`{"id":"42"}`))
+			w := httptest.NewRecorder()
+			test.handler(nil, w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+		})
 	}
 }
 
@@ -92,10 +127,6 @@ func TestAdminFlowIntegration(t *testing.T) {
 	if foundConnID == 0 {
 		t.Fatalf("Expected connection %s to be listed", testDBName)
 	}
-	if err := DeleteConnection(db, foundConnID); err != nil {
-		t.Fatalf("DeleteConnection failed: %v", err)
-	}
-
 	// Test Groups
 	groupName := "test_flow_group"
 	if err := AddGroup(db, groupName); err != nil {
@@ -158,9 +189,58 @@ func TestAdminFlowIntegration(t *testing.T) {
 		t.Fatalf("GetGroups did not return group %d", foundGroupID)
 	}
 
+	if err := GrantPermission(db, foundGroupID, foundConnID, "view"); err != nil {
+		t.Fatalf("GrantPermission failed: %v", err)
+	}
+	permissions, err := GetPermissions(db)
+	if err != nil {
+		t.Fatalf("GetPermissions failed: %v", err)
+	}
+	var foundPermissionID int
+	for _, permission := range permissions {
+		if permission.GroupID == foundGroupID && permission.DatabaseID == foundConnID {
+			foundPermissionID = permission.ID
+			break
+		}
+	}
+	if foundPermissionID == 0 {
+		t.Fatalf("Expected permission for group %d and connection %d", foundGroupID, foundConnID)
+	}
+
+	var requestID int64
+	err = db.QueryRow(`
+		INSERT INTO migration_change_requests (database_id, requester_user_id, requester_name, action, status)
+		VALUES ($1, $2, $3, 'up', 'pending_review')
+		RETURNING id`, foundConnID, foundUserID, userName).Scan(&requestID)
+	if err != nil {
+		t.Fatalf("create migration request fixture: %v", err)
+	}
+	conflict := runDeleteHandler(t, HandleDeleteConnection, db, foundConnID, http.StatusConflict)
+	if !strings.Contains(conflict.Body.String(), "migration history") {
+		t.Fatalf("connection delete conflict = %q, want migration history explanation", conflict.Body.String())
+	}
+	if _, err := db.Exec("DELETE FROM migration_change_requests WHERE id = $1", requestID); err != nil {
+		t.Fatalf("delete migration request fixture: %v", err)
+	}
+
 	// Cleanup
-	_ = DeleteUser(db, foundUserID)
-	_ = DeleteGroup(db, foundGroupID)
+	runDeleteHandler(t, HandleDeletePermission, db, foundPermissionID, http.StatusOK)
+	runDeleteHandler(t, HandleDeleteUser, db, foundUserID, http.StatusOK)
+	runDeleteHandler(t, HandleDeleteGroup, db, foundGroupID, http.StatusOK)
+	runDeleteHandler(t, HandleDeleteConnection, db, foundConnID, http.StatusOK)
+}
+
+func runDeleteHandler(t *testing.T, handler func(*sql.DB, http.ResponseWriter, *http.Request), db *sql.DB, id, wantStatus int) *httptest.ResponseRecorder {
+	t.Helper()
+	body := `{"id":` + strconv.Itoa(id) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/delete", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler(db, w, req)
+	if w.Code != wantStatus {
+		t.Fatalf("delete handler status = %d, want %d, body = %q", w.Code, wantStatus, w.Body.String())
+	}
+	return w
 }
 
 func TestHandleAddUserForm(t *testing.T) {

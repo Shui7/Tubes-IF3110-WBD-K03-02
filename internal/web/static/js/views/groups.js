@@ -1,5 +1,5 @@
 import { fetchConnections } from "./connections.js"
-import { apiFetch, fetchJsonArray } from "./utils.js"
+import { apiFetch, deleteAdminItem, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderGroupsTab() {
@@ -85,17 +85,16 @@ async function renderGroupsTable(groupsTab) {
         deleteButton.textContent = "Delete"
         deleteButton.addEventListener("click", async function (event) {
             event.preventDefault()
-            const response = await apiFetch('/api/admin/groups/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id: group.id
-                })
-            })
-            if (response.ok) {
-                renderGroupsTab()
+            deleteButton.disabled = true
+            errorDiv.hidden = true
+            try {
+                await deleteAdminItem("/api/admin/groups/delete", group.id)
+                await renderGroupsTab()
+            } catch (error) {
+                errorDiv.textContent = `Unable to delete group: ${error.message}`
+                errorDiv.hidden = false
+            } finally {
+                deleteButton.disabled = false
             }
         })
         tableDataActions.append(deleteButton)
@@ -269,17 +268,16 @@ async function renderPermissionsTable(groupsTab) {
         deleteButton.textContent = "Delete"
         deleteButton.addEventListener("click", async function (event) {
             event.preventDefault()
-            const response = await apiFetch('/api/admin/permissions/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id: permission.id
-                })
-            })
-            if (response.ok) {
-                renderGroupsTab()
+            deleteButton.disabled = true
+            errorDiv.hidden = true
+            try {
+                await deleteAdminItem("/api/admin/permissions/delete", permission.id)
+                await renderGroupsTab()
+            } catch (error) {
+                errorDiv.textContent = `Unable to delete permission: ${error.message}`
+                errorDiv.hidden = false
+            } finally {
+                deleteButton.disabled = false
             }
         })
         tableDataActions.append(deleteButton)

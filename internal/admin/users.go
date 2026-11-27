@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
@@ -158,23 +157,15 @@ func HandleDeleteUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type deleteUserRequest struct {
-		ID string `json:"id"`
-	}
-	var req deleteUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	id, err := decodeDeleteID(r)
+	if err != nil {
+		http.Error(w, "Invalid request: id must be a positive integer", http.StatusBadRequest)
 		return
 	}
-
-	idStr := req.ID
-	id, err := strconv.Atoi(idStr)
-	if err == nil {
-		if err := DeleteUser(db, id); err != nil {
-			slog.ErrorContext(r.Context(), "admin.user_delete_failed", "error", err)
-			http.Error(w, "Failed to delete user", http.StatusInternalServerError)
-			return
-		}
+	if err := DeleteUser(db, id); err != nil {
+		slog.ErrorContext(r.Context(), "admin.user_delete_failed", "error", err)
+		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 func isPlatformDB(database string) bool {
@@ -172,27 +172,37 @@ func HandleDeleteConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	type connDeleteRequest struct {
-		id string
-	}
-	var req connDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	id, err := decodeDeleteID(r)
+	if err != nil {
+		http.Error(w, "Invalid request: id must be a positive integer", http.StatusBadRequest)
 		return
 	}
-
-	idStr := req.id
-	id, err := strconv.Atoi(idStr)
-	if err == nil {
-		if err := DeleteConnection(db, id); err != nil {
-			slog.ErrorContext(r.Context(), "admin.connection_delete_failed", "error", err)
-			http.Error(w, "Failed to remove database connection", http.StatusInternalServerError)
+	if err := DeleteConnection(db, id); err != nil {
+		slog.ErrorContext(r.Context(), "admin.connection_delete_failed", "error", err)
+		var postgresErr *pq.Error
+		if errors.As(err, &postgresErr) && postgresErr.Code == "23503" {
+			http.Error(w, "Cannot delete this connection because migration history or other records still reference it. The audit history was retained.", http.StatusConflict)
 			return
 		}
+		http.Error(w, "Failed to remove database connection", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+func decodeDeleteID(r *http.Request) (int, error) {
+	var req struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return 0, err
+	}
+	if req.ID < 1 {
+		return 0, errors.New("id must be positive")
+	}
+	return req.ID, nil
 }
 
 func HandleGetConnections(db *sql.DB, w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,5 @@
 import { createErrorDiv, createSuccessDiv } from "./components.js"
-import { apiFetch, fetchJsonArray } from "./utils.js"
+import { apiFetch, deleteAdminItem, fetchJsonArray } from "./utils.js"
 
 export async function renderConnectionsTab() {
     const container = document.getElementById("admin-container")
@@ -114,17 +114,16 @@ export async function renderConnectionsTab() {
         deleteButton.textContent = "Delete"
         deleteButton.addEventListener("click", async function (event) {
             event.preventDefault()
-            const response = await apiFetch('/api/admin/connections/delete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id: connection.id
-                })
-            })
-            if (response.ok) {
-                renderConnectionsTab()
+            deleteButton.disabled = true
+            errorDiv.hidden = true
+            try {
+                await deleteAdminItem("/api/admin/connections/delete", connection.id)
+                await renderConnectionsTab()
+            } catch (error) {
+                errorDiv.textContent = `Unable to delete connection: ${error.message}`
+                errorDiv.hidden = false
+            } finally {
+                deleteButton.disabled = false
             }
         })
         tableDataActions.append(deleteButton)
