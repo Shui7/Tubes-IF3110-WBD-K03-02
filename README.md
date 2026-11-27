@@ -141,3 +141,23 @@ Attributes:
   db.rows_affected = 1
   db.duration_ms = 3
 ```
+
+## Lock Recovery When a Worker Fails
+
+The per-database lock is stored in the platform database as the `holds_lock` column of `migration_jobs`, protected by the partial unique index `one_lock_per_db`. At most one job per database can hold the lock, across all workers, and the lock survives restarts. The lock is acquired atomically in `Claim()` (using `FOR UPDATE SKIP LOCKED` and strict per-database FIFO order). It is released only when a job reaches `success` or `failed`. While a job is `pending` (waiting for a retry), `uncertain`, or `partial`, the lock stays held so no other migration can slip in.
+
+**Recovery flow.**
+
+1. **Detection.** The worker updates `heartbeat_at` every 5 seconds. If the worker dies, the heartbeat stops.
+2. **Reaper.** Every worker runs a periodic reaper. A `running` job whose heartbeat is older than 30 seconds is moved to `uncertain`. The lock is not released, because the SQL may have been committed before the worker died.
+3. **Evidence check.** Before retrying, the outcome is verified:
+   - *Regular migration:* the target database's migration history is checked for a successful record with this job ID and version. If found, the job is marked `success` (lock released). If not, the job is rescheduled with backoff while attempts remain, otherwise marked `failed` (lock released).
+   - *Batch migration:* checkpoints are stored in the target database in the same transaction as each batch's changes, so the job resumes from the last checkpoint without repeating committed batches. If attempts are exhausted, the job becomes `partial` or `failed`.
+   - *Evidence unreadable* (e.g. the target database is unavailable): the job stays `uncertain` with the lock held, and the next reaper cycle tries again.
+
+**Other cases.**
+
+- **Slow worker, not dead.** If the reaper has already taken over the job, the old worker's heartbeat fails (`job.lost`). That worker cancels its work and changes no state, so there is only ever one owner of a job.
+- **Graceful shutdown (SIGTERM).** The job is returned to the queue without consuming an attempt, and the lock stays held.
+- **Ambiguous commit** (connection lost during `COMMIT`). The job is immediately treated as `uncertain` and follows the same evidence check.
+- **No double commit.** The unique lock index prevents two workers from running on the same database, and a retry happens only after evidence confirms the SQL was not committed.
