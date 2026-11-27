@@ -1,13 +1,18 @@
 import { renderHome } from "./views/home.js"
 import { renderLoginView } from "./views/login.js"
 import { renderAdminView } from "./views/admin.js"
+import { renderDatabases } from "./views/databases.js"
+import { renderDatabaseDetails } from "./views/databasedetail.js"
 
 const routes = [
     { match: (path) => path === "/" || path === "/logout", render: renderHome },
     { match: (path) => path === "/login", render: renderLoginView },
     { match: (path) => /^\/admin\/?$/.test(path), render: renderAdminView },
-    { match: (path) => /^\/databases\/?$/.test(path), serverRendered: true },
-    { match: (path) => /^\/databases\/\d+\/?$/.test(path), serverRendered: true },
+    { match: (path) => /^\/databases\/?$/.test(path), render: renderDatabases },
+    {
+        match: (path) => /^\/databases\/\d+\/?$/.test(path),
+        render: () => renderDatabaseDetails(Number(window.location.pathname.split("/")[2])),
+    },
 ]
 
 export function startRouter() {

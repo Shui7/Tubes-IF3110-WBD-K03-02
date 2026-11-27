@@ -122,7 +122,6 @@ export async function renderLoginView() {
             passwordInput.value = "";
             setCsrfToken(data.csrfToken)
             renderNavRight()
-            renderHome()
 
             window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));
@@ -167,7 +166,7 @@ export async function renderNavRight() {
             const data = await response.json().catch(() => ({"csrfToken":""}))
             setCsrfToken(data.csrfToken)
             renderNavRight()
-            await renderLoginView()
+
             window.history.pushState({}, '', '/login');
             window.dispatchEvent(new PopStateEvent('popstate'));
         })
@@ -180,7 +179,6 @@ export async function renderNavRight() {
 
         loginButton.addEventListener("click", async function (event) {
             event.preventDefault();
-            await renderLoginView()
             window.history.pushState({}, '', '/login');
             window.dispatchEvent(new PopStateEvent('popstate'));
         })

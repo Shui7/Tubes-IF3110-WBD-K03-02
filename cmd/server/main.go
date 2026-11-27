@@ -97,8 +97,11 @@ func main() {
 	}
 
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
-	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
-	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
+	http.Handle("GET /api/databases", authMiddleware.RequireAuth(http.HandlerFunc(apiDatabases)))
+	http.Handle("GET /api/databases/{id}", authMiddleware.RequireAuth(http.HandlerFunc(apiDatabaseDetail)))
+	http.HandleFunc("GET /databases", index)
+	http.HandleFunc("GET /databases/", index)
+	http.Handle("POST /databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/health", health)
@@ -245,61 +248,88 @@ func adminPage(w http.ResponseWriter, r *http.Request) {
 
 func databases(w http.ResponseWriter, r *http.Request) {
 	subPath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/databases"), "/")
-	if subPath == "" {
-		renderDatabases(w, r)
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
 		return
 	}
 	parts := strings.Split(subPath, "/")
+	if len(parts) != 2 || parts[1] != "migrations" {
+		http.NotFound(w, r)
+		return
+	}
 	id, err := strconv.Atoi(parts[0])
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	// Authorization: check user's access level for this specific database.
 	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
 	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, id)
 	if err != nil || level == authz.AccessNone {
 		http.Error(w, "Forbidden: you do not have access to this database", http.StatusForbidden)
 		return
 	}
-
-	if len(parts) == 2 && parts[1] == "migrations" {
-		// Only View+Edit users may execute migrations (POST). View-only users can still
-		// reach this route via GET (which just redirects back to the detail page).
-		if r.Method == http.MethodPost && level != authz.AccessEdit {
-			http.Error(w, "Forbidden: edit access required to execute migrations", http.StatusForbidden)
-			return
-		}
-		handleMigration(id, w, r)
+	if level != authz.AccessEdit {
+		http.Error(w, "Forbidden: edit access required to execute migrations", http.StatusForbidden)
 		return
 	}
-	if len(parts) != 1 || r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
-	}
-	renderDatabaseDetail(id, string(level), w, r)
+	handleMigration(id, w, r)
 }
 
-func renderDatabases(w http.ResponseWriter, r *http.Request) {
+func apiDatabases(w http.ResponseWriter, r *http.Request) {
 	data := web.DatabasesData{BaseData: currentUser(r)}
 	if platformDB == nil {
-		data.Error = "Platform database is unavailable."
-		web.RenderTemplate(w, "databases.html", data)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Platform database is unavailable."})
 		return
 	}
 	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
 	dbList, err := authz.GetUserDatabaseList(platformDB, sess.UserID)
 	if err != nil {
-		data.Error = fmt.Sprintf("Unable to load databases: %v", err)
-	} else {
-		for _, d := range dbList {
-			data.Databases = append(data.Databases, web.DatabaseItem{
-				ID: d.ConnectionID, Name: d.Name, AccessLevel: string(d.AccessLevel),
-			})
-		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Unable to load databases: %v", err)})
+		return
 	}
-	web.RenderTemplate(w, "databases.html", data)
+	for _, d := range dbList {
+		data.Databases = append(data.Databases, web.DatabaseItem{
+			ID: d.ConnectionID, Name: d.Name, AccessLevel: string(d.AccessLevel),
+		})
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func apiDatabaseDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid database ID"})
+		return
+	}
+	if platformDB == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Platform database is unavailable."})
+		return
+	}
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Unable to check database access"})
+		return
+	}
+	if level == authz.AccessNone {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "You do not have access to this database"})
+		return
+	}
+	data, err := loadDatabaseDetail(id, string(level), r)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		slog.Error("api.response_encode_failed", "error", err)
+	}
 }
 
 type managedConnection struct {
@@ -346,23 +376,20 @@ func quoteConnectionValue(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "\\'") + "'"
 }
 
-func renderDatabaseDetail(id int, accessLevel string, w http.ResponseWriter, r *http.Request) {
+func loadDatabaseDetail(id int, accessLevel string, r *http.Request) (web.DatabaseDetailData, error) {
 	manager, connection, err := openManagedDatabase(r.Context(), id)
 	if err != nil {
-		renderDatabaseError(w, r, id, fmt.Sprintf("Database %d", id), r.URL.Query().Get("tab"), err)
-		return
+		return web.DatabaseDetailData{}, err
 	}
 	defer manager.Close()
 
 	const schema = "public"
 	details, err := manager.ListTableDetails(r.Context(), schema)
 	if err != nil {
-		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
-		return
+		return web.DatabaseDetailData{}, err
 	}
 	if len(details) == 0 {
-		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), fmt.Errorf("no tables found in schema %q", schema))
-		return
+		return web.DatabaseDetailData{}, fmt.Errorf("no tables found in schema %q", schema)
 	}
 	table := r.URL.Query().Get("table")
 	if table == "" {
@@ -387,29 +414,19 @@ func renderDatabaseDetail(id int, accessLevel string, w http.ResponseWriter, r *
 		}
 	}
 	if !selected {
-		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), fmt.Errorf("table %q was not found", table))
-		return
+		return web.DatabaseDetailData{}, fmt.Errorf("table %q was not found", table)
 	}
 	rows, err := manager.PreviewRows(r.Context(), schema, table, 100)
 	if err != nil {
-		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
-		return
+		return web.DatabaseDetailData{}, err
 	}
 	data.DataHeaders, data.DataRows = convertRows(rows, data.Columns)
 	migrations, err := manager.ListMigrations(r.Context())
 	if err != nil {
-		renderDatabaseError(w, r, id, connection.name, r.URL.Query().Get("tab"), err)
-		return
+		return web.DatabaseDetailData{}, err
 	}
 	data.Migrations = convertMigrations(migrations)
-	web.RenderTemplate(w, "databasedetail.html", data)
-}
-
-func renderDatabaseError(w http.ResponseWriter, r *http.Request, id int, name, tab string, err error) {
-	web.RenderTemplate(w, "databasedetail.html", web.DatabaseDetailData{
-		BaseData: currentUser(r), Database: web.DatabaseItem{ID: id, Name: name, AccessLevel: "view"},
-		Error: err.Error(), ActiveTab: tab,
-	})
+	return data, nil
 }
 
 func handleMigration(id int, w http.ResponseWriter, r *http.Request) {
