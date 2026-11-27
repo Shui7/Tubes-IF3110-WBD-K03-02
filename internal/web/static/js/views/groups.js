@@ -1,4 +1,5 @@
-import { fetchConnections } from "./connections"
+import { fetchConnections } from "./connections.js"
+import { apiFetch } from "./utils.js"
 
 export async function renderGroupsTab() {
      const container = document.getElementById("content")

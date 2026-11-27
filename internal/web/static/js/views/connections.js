@@ -1,3 +1,5 @@
+import { apiFetch } from "./utils.js"
+
 export async function renderConnectionsTab() {
     const container = document.getElementById("content")
 

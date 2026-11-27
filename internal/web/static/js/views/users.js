@@ -1,3 +1,6 @@
+import { fetchGroups } from "./groups.js"
+import { apiFetch } from "./utils.js"
+
 export async function renderUsersTab() {
     const container = document.getElementById("content")
 

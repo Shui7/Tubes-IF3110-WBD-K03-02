@@ -1,5 +1,8 @@
-import { renderConnectionsTab } from "./connections"
-import { apiFetch } from "./utils"
+import { renderConnectionsTab } from "./connections.js"
+import { renderGroupsTab } from "./groups.js"
+import { renderHome } from "./home.js"
+import { renderUsersTab } from "./users.js"
+import { renderLoading, validateSession } from "./utils.js"
 
 export async function renderAdminView() {
     if (await validateSession()) {
