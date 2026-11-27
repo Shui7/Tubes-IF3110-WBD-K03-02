@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -166,4 +167,16 @@ func HandleDeleteConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 	}
 
 	http.Redirect(w, r, "/admin#connections", http.StatusSeeOther)
+}
+
+func HandleGetConnections(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	connections, err := GetConnections(db)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "admin.connection_fetch_failed", "error", err)
+		http.Error(w, "Failed to fetch connections", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(connections)
 }

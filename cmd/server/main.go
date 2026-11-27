@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,40 +97,54 @@ func main() {
 	}
 
 	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
-	http.Handle("/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleAddConnection(platformDB, w, r)
-	})))
-	http.Handle("/admin/connections/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleDeleteConnection(platformDB, w, r)
-	})))
-	http.Handle("/admin/groups/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleAddGroup(platformDB, w, r)
-	})))
-	http.Handle("/admin/groups/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleDeleteGroup(platformDB, w, r)
-	})))
-	http.Handle("/admin/permissions/grant", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleGrantPermission(platformDB, w, r)
-	})))
-	http.Handle("/admin/permissions/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleDeletePermission(platformDB, w, r)
-	})))
-	http.Handle("/admin/users/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleAddUser(platformDB, w, r)
-	})))
-	http.Handle("/admin/users/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		admin.HandleDeleteUser(platformDB, w, r)
-	})))
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	http.HandleFunc("/", index)
+	http.HandleFunc("/api/health", health)
 	http.HandleFunc("/api/auth/login", authHandlerAPI.HandleLogin)
 	http.HandleFunc("/api/auth/logout", authHandlerAPI.HandleLogout)
 	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
 	http.HandleFunc("/api/auth/validate-session", authHandlerAPI.ValidateSession)
 	http.HandleFunc("/api/auth/refresh-login", authHandlerAPI.RefreshLoginCsrfToken)
+	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
+	http.Handle("/api/admin/connections/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGetConnections(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddConnection(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/connections/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteConnection(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/groups/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGetGroups(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/groups/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddGroup(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/groups/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteGroup(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/permissions/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGetPermissions(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/permissions/grant", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGrantPermission(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/permissions/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeletePermission(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/users/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleGetUsers(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/users/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleAddUser(platformDB, w, r)
+	})))
+	http.Handle("/api/admin/users/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		admin.HandleDeleteUser(platformDB, w, r)
+	})))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -227,7 +242,8 @@ func adminPage(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "admin.load_failed", "resource", "permissions", "error", err)
 		}
 	}
-	web.RenderTemplate(w, "admin.html", data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
 
 func databases(w http.ResponseWriter, r *http.Request) {
@@ -515,4 +531,9 @@ func nullStringValue(value sql.NullString) string {
 		return value.String
 	}
 	return ""
+}
+
+func health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -127,6 +128,18 @@ func HandleDeleteGroup(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
 }
 
+func HandleGetGroups(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	groups, err := GetGroups(db)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "admin.group_fetch_failed", "error", err)
+		http.Error(w, "Failed to fetch groups", http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(groups)
+}
+
 func HandleGrantPermission(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
@@ -164,4 +177,16 @@ func HandleDeletePermission(db *sql.DB, w http.ResponseWriter, r *http.Request) 
 	}
 
 	http.Redirect(w, r, "/admin#groups", http.StatusSeeOther)
+}
+
+func HandleGetPermissions(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	permissions, err := GetPermissions(db)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "admin.permission_fetch_failed", "error", err)
+		http.Error(w, "Failed to fetch permissions", http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(permissions)
 }

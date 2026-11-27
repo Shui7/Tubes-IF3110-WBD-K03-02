@@ -2,6 +2,7 @@ package admin
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -158,4 +159,16 @@ func HandleDeleteUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/admin#users", http.StatusSeeOther)
+}
+
+func HandleGetUsers(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	users, err := GetUsers(db)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "admin.user_fetch_failed", "error", err)
+		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
 }
