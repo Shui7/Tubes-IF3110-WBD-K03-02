@@ -1,8 +1,9 @@
-﻿package auth
+package auth
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -469,6 +470,45 @@ func TestHandleLoginRejectsMissingCSRFCookie(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for missing CSRF cookie, got %d", w.Code)
+	}
+}
+
+func TestGetSessionInfoRecognizesValidSession(t *testing.T) {
+	db := openTestDB(t)
+	store := newTestStore(db)
+
+	var userID int
+	err := db.QueryRow(
+		`INSERT INTO users (username, password_hash, name, role) VALUES ('api_session_info_user', 'hash', 'Session User', 'User') RETURNING id`,
+	).Scan(&userID)
+	if err != nil {
+		t.Fatalf("insert test user: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM sessions WHERE user_id = $1`, userID)
+		db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	})
+
+	session, err := store.CreateSession(userID)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := NewAuthHandlerAPI(db, store)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "session_id", Value: session.ID})
+	w := httptest.NewRecorder()
+	handler.GetSessionInfo(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var response apiSessionInfo
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	if !response.InSession || response.Name != "Session User" || response.Role != "User" {
+		t.Fatalf("session response = %+v, want active session for Session User", response)
 	}
 }
 

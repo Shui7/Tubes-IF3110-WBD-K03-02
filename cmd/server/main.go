@@ -172,7 +172,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_id")
 	if err == nil && cookie != nil {
 		session, err := sessionStore.GetSession(cookie.Value)
-		if err != nil {
+		if err == nil && session != nil {
 			_ = sessionStore.TouchSession(session.ID)
 			csrfToken = session.CSRFToken
 		}

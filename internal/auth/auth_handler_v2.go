@@ -153,7 +153,7 @@ func (h *AuthHandlerAPI) GetSessionInfo(w http.ResponseWriter, r *http.Request) 
 	cookie, err := r.Cookie("session_id")
 	if err == nil && cookie != nil {
 		session, err := h.sessionStore.GetSession(cookie.Value)
-		if err != nil {
+		if err == nil && session != nil {
 			_ = h.sessionStore.TouchSession(session.ID)
 			name = session.Name
 			role = session.Role
