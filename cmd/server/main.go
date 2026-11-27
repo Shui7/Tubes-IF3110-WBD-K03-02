@@ -96,13 +96,12 @@ func main() {
 		return authMiddleware.RequireAuth(authMiddleware.RequireRole("Admin", next))
 	}
 
-	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
 	http.HandleFunc("/", index)
-	http.HandleFunc("/api/health", health)
+	http.HandleFunc("/health", health)
 	http.HandleFunc("/api/auth/login", authHandlerAPI.HandleLogin)
 	http.HandleFunc("/api/auth/logout", authHandlerAPI.HandleLogout)
 	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
