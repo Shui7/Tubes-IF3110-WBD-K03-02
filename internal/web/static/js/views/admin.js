@@ -1,13 +1,13 @@
 import { createErrorDiv, setTitle } from "./components.js"
 import { renderConnectionsTab } from "./connections.js"
 import { renderGroupsTab } from "./groups.js"
-import { renderHome } from "./home.js"
+import { renderLoginView } from "./login.js"
 import { renderUsersTab } from "./users.js"
 import { renderLoading, validateSession } from "./utils.js"
 
 export async function renderAdminView() {
-    if (await validateSession()) {
-        await renderHome()
+    if (!await validateSession()) {
+        await renderLoginView()
         return
     }
 
