@@ -68,9 +68,7 @@ export async function renderErrorView(errorCode, errorTitle, errorMessage) {
 }
 
 export async function validateSession() {
-    const response = await fetch('/api/auth/validate-session')
-    const data = await response.json().catch({"valid": false})
-    if (data.valid) console.log("Session valid")
-    else console.log("Session not valid")
-    return data.valid
+    const response = await fetch('/api/auth/me')
+    const data = await response.json().catch({"inSession": false})
+    return data.inSession
 }

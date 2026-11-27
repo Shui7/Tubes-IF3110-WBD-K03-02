@@ -28,9 +28,10 @@ type apiValidateSessionResponse struct {
 	Valid bool `json:"valid"`
 }
 
-type apiNameRoleResponse struct {
-	Name string `json:"name"`
-	Role string `json:"role"`
+type apiSessionInfo struct {
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	InSession bool   `json:"inSession"`
 }
 
 func NewAuthHandlerAPI(db *sql.DB, sessionStore *SessionStore) *AuthHandlerAPI {
@@ -145,41 +146,26 @@ func (h *AuthHandlerAPI) RefreshLoginCsrfToken(w http.ResponseWriter, r *http.Re
 	})
 }
 
-func (h *AuthHandlerAPI) GetNameAndRole(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandlerAPI) GetSessionInfo(w http.ResponseWriter, r *http.Request) {
 	name := "Guest"
 	role := "Guest"
+	inSession := false
 	cookie, err := r.Cookie("session_id")
 	if err == nil && cookie != nil {
 		session, err := h.sessionStore.GetSession(cookie.Value)
-		if err == nil {
+		if err != nil {
 			_ = h.sessionStore.TouchSession(session.ID)
 			name = session.Name
 			role = session.Role
+			inSession = true
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(apiNameRoleResponse{
-		Name: name,
-		Role: role,
-	})
-}
-
-func (h *AuthHandlerAPI) ValidateSession(w http.ResponseWriter, r *http.Request) {
-	sessionValid := false
-
-	cookie, err := r.Cookie("session_id")
-	if err == nil && cookie != nil {
-		session, err := h.sessionStore.GetSession(cookie.Value)
-		if err == nil {
-			_ = h.sessionStore.TouchSession(session.ID)
-			sessionValid = true
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(apiValidateSessionResponse{
-		Valid: sessionValid,
+	json.NewEncoder(w).Encode(apiSessionInfo{
+		Name:      name,
+		Role:      role,
+		InSession: inSession,
 	})
 }
 

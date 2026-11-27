@@ -104,10 +104,8 @@ func main() {
 	http.HandleFunc("/health", health)
 	http.HandleFunc("/api/auth/login", authHandlerAPI.HandleLogin)
 	http.HandleFunc("/api/auth/logout", authHandlerAPI.HandleLogout)
-	http.HandleFunc("/api/auth/name-role", authHandlerAPI.GetNameAndRole)
-	http.HandleFunc("/api/auth/validate-session", authHandlerAPI.ValidateSession)
+	http.HandleFunc("/api/auth/me", authHandlerAPI.GetSessionInfo)
 	http.HandleFunc("/api/auth/refresh-login", authHandlerAPI.RefreshLoginCsrfToken)
-	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
 	http.Handle("/api/admin/connections", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGetConnections(platformDB, w, r)
 	})))

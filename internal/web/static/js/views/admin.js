@@ -21,10 +21,10 @@ export async function renderAdminView() {
     titleDiv.append(document.createElement("h1").appendChild(document.createTextNode("Platform Administration")))
     container.append(titleDiv)
 
-    const response = await fetch('/api/auth/name-role');
-    const data = await response.json().catch({"name": "", "role": ""})
+    const response = await fetch('/api/auth/me');
+    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
 
-    if (role !== "Admin") {
+    if (data.role !== "Admin") {
         let errorDiv = createErrorDiv("You do not have permission to access this page.")
         container.append(errorDiv)
         return

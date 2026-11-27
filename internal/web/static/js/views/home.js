@@ -6,15 +6,14 @@ export async function renderHome() {
         await renderLoginView()
         return
     }
-    console.log("Session valid... probably")
 
     renderLoading()
     
     const container = document.getElementById("content")
     container.innerHTML = ""
 
-    const response = await fetch('/api/auth/name-role');
-    const data = await response.json().catch({"name": "", "role": ""})
+    const response = await fetch('/api/auth/me');
+    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
 
     let welcomeBackMessage = document.createElement("h1")
     let nameText = document.createElement("strong")

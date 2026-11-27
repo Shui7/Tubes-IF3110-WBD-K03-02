@@ -138,45 +138,48 @@ export async function renderNavRight() {
 
     container.innerHTML = ""
 
-    const response = await fetch('/api/auth/name-role');
-    const data = await response.json().catch({"name": "", "role": ""})
+    const response = await fetch('/api/auth/me');
+    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
 
     let nameSpan = document.createElement("span")
     nameSpan.classList.add("muted", "mono")
     nameSpan.textContent = data.name + " (" + data.role + ")"
     container.append(nameSpan)
 
-    let logoutButton = document.createElement("button")
-    logoutButton.type = "submit"
-    logoutButton.id = "logout-button"
-    logoutButton.classList.add("btn", "btn-danger", "btn-sm")
-    logoutButton.textContent = "Logout"
-    container.append(logoutButton)
+    if (inSession) {
+        let logoutButton = document.createElement("button")
+        logoutButton.type = "submit"
+        logoutButton.id = "logout-button"
+        logoutButton.classList.add("btn", "btn-danger", "btn-sm")
+        logoutButton.textContent = "Logout"
+        container.append(logoutButton)
 
-    logoutButton.addEventListener("click", async function (event) {
-        event.preventDefault();
-        try {
+        logoutButton.addEventListener("click", async function (event) {
+            event.preventDefault();
             const response = await apiFetch('/api/auth/logout', {
                 method: 'POST',
             });
             const data = await response.json().catch({"csrfToken":""})
             setCsrfToken(data.csrfToken)
             renderNavRight()
+            await renderLoginView()
             window.history.pushState({}, '', '/login');
             window.dispatchEvent(new PopStateEvent('popstate'));
-        } catch {
-        }
-    })
+        })
+    }
+    else {
+        let loginButton = document.createElement("a")
+        loginButton.classList.add("btn", "btn-outline", "btn-sm")
+        loginButton.textContent = "Login"
+        container.append(loginButton)
 
-    let loginButton = document.createElement("a")
-    loginButton.classList.add("btn", "btn-outline", "btn-sm")
-    loginButton.textContent = "Login"
-    container.append(loginButton)
-
-    loginButton.addEventListener("click", async function (event) {
-        event.preventDefault();
-        await renderLoginView()
-    })
+        loginButton.addEventListener("click", async function (event) {
+            event.preventDefault();
+            await renderLoginView()
+            window.history.pushState({}, '', '/login');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        })
+    }
 }
 
 async function refreshLoginCsrfToken() {
