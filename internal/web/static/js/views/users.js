@@ -69,6 +69,11 @@ export async function renderUsersTab() {
         let tableRow = document.createElement("tr")
         tableBody.append(tableRow)
 
+        let tableDataDatabase = document.createElement("td")
+        tableDataDatabase.classList.add("mono")
+        tableDataDatabase.textContent = user.database
+        tableRow.append(tableDataDatabase)
+
         let tableDataUsername = document.createElement("td")
         tableDataUsername.classList.add("mono", "font-bold")
         let usernameStrong = document.createElement("strong")
