@@ -1,5 +1,5 @@
 import { fetchGroups } from "./groups.js"
-import { apiFetch } from "./utils.js"
+import { apiFetch, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderUsersTab() {
@@ -302,7 +302,5 @@ export async function renderUsersTab() {
 }
 
 export async function fetchUsers() {
-    const response = await fetch('/api/admin/users');
-    const data = await response.json().catch(() => ({"users": []}))
-    return data.users
+    return fetchJsonArray("/api/admin/users")
 }

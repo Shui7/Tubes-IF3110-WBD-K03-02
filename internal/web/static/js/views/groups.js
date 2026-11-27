@@ -1,5 +1,5 @@
 import { fetchConnections } from "./connections.js"
-import { apiFetch } from "./utils.js"
+import { apiFetch, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderGroupsTab() {
@@ -90,7 +90,7 @@ async function renderGroupsTable(groupsTab) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    id: group.ID
+                    id: group.id
                 })
             })
             if (response.ok) {
@@ -237,19 +237,19 @@ async function renderPermissionsTable(groupsTab) {
         let tableDataGroupName = document.createElement("td")
         tableDataGroupName.classList.add("mono", "font-bold")
         let groupNameStrong = document.createElement("strong")
-        groupNameStrong.textContent = permission.GroupName
+        groupNameStrong.textContent = permission.groupName
         tableDataGroupName.append(groupNameStrong)
         tableRow.append(tableDataGroupName)
 
         let tableDataDatabaseName = document.createElement("td")
         tableDataDatabaseName.classList.add("mono")
-        tableDataDatabaseName.textContent = permission.DatabaseName
+        tableDataDatabaseName.textContent = permission.databaseName
         tableRow.append(tableDataDatabaseName)
 
         let tableDataAccessLevel = document.createElement("td")
         let accessLevelBadge = document.createElement("span")
         accessLevelBadge.classList.add("badge")
-        if (permission.AccessLevel === "edit") {
+        if (permission.accessLevel === "edit") {
             accessLevelBadge.classList.add("badge-edit")
             accessLevelBadge.textContent = "View + Edit"
         } else {
@@ -431,13 +431,9 @@ async function renderPermissionsTable(groupsTab) {
 }
 
 export async function fetchGroups() {
-    const response = await fetch('/api/admin/groups');
-    const data = await response.json().catch(() => ({"groups": []}))
-    return data.groups
+    return fetchJsonArray("/api/admin/groups")
 }
 
 export async function fetchPermissions() {
-    const response = await fetch('/api/admin/permissions');
-    const data = await response.json().catch(() => ({"permissions": []}))
-    return data.permissions
+    return fetchJsonArray("/api/admin/permissions")
 }

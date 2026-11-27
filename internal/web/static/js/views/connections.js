@@ -1,5 +1,5 @@
 import { createErrorDiv, createSuccessDiv } from "./components.js"
-import { apiFetch } from "./utils.js"
+import { apiFetch, fetchJsonArray } from "./utils.js"
 
 export async function renderConnectionsTab() {
     const container = document.getElementById("content")
@@ -288,7 +288,5 @@ export async function renderConnectionsTab() {
 }
 
 export async function fetchConnections() {
-    const response = await fetch('/api/admin/connections');
-    const data = await response.json().catch(() => ({"connections": []}))
-    return data.connections
+    return fetchJsonArray("/api/admin/connections")
 }

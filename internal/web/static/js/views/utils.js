@@ -30,6 +30,20 @@ export async function apiFetch(url, options = {}) {
     return response;
 }
 
+export async function fetchJsonArray(url) {
+    const response = await apiFetch(url);
+    if (!response.ok) {
+        throw new Error(await response.text() || `Request failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    if (data === null) return [];
+    if (!Array.isArray(data)) {
+        throw new TypeError(`Expected an array response from ${url}`);
+    }
+    return data;
+}
+
 export async function renderLoading() {
     const container = document.getElementById("content")
     container.innerHTML = ""
