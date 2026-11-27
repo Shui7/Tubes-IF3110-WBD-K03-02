@@ -128,13 +128,13 @@ func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, actio
 	if err := insertEvent(tx, request.ID, "draft", requesterID, requesterName, "Request created"); err != nil {
 		return Request{}, err
 	}
-	if err := insertEvent(tx, request.ID, "pending_review", requesterID, requesterName, "Submitted for group leader approval"); err != nil {
+	if err := insertEvent(tx, request.ID, "pending_review", requesterID, requesterName, "Submitted for required approval"); err != nil {
 		return Request{}, err
 	}
 	for _, approval := range required {
 		if _, err := tx.Exec(`
 			INSERT INTO migration_change_approvals (request_id, group_id, group_name, leader_user_id, leader_name)
-			VALUES ($1,$2,$3,$4,$5)`, request.ID, approval.groupID, approval.group, approval.leader.Int64, approval.name); err != nil {
+			VALUES ($1,$2,$3,$4,$5)`, request.ID, approval.groupID, approval.group, approval.leader, approval.name); err != nil {
 			return Request{}, fmt.Errorf("create group approval: %w", err)
 		}
 	}
@@ -146,6 +146,10 @@ func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, actio
 }
 
 func ListRequests(db *sql.DB, databaseID, userID int) ([]Request, error) {
+	var isAdmin bool
+	if err := db.QueryRow(`SELECT is_admin OR role='Admin' FROM users WHERE id=$1`, userID).Scan(&isAdmin); err != nil {
+		return nil, fmt.Errorf("check migration approval role: %w", err)
+	}
 	rows, err := db.Query(`
 		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
 		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, mode, COALESCE(batch_size,0),
@@ -172,11 +176,16 @@ func ListRequests(db *sql.DB, databaseID, userID int) ([]Request, error) {
 		}
 		for approvals.Next() {
 			var approval Approval
-			if err := approvals.Scan(&approval.GroupID, &approval.GroupName, &approval.LeaderID, &approval.LeaderName, &approval.Decision, &approval.Comment); err != nil {
+			var leaderID sql.NullInt64
+			if err := approvals.Scan(&approval.GroupID, &approval.GroupName, &leaderID, &approval.LeaderName, &approval.Decision, &approval.Comment); err != nil {
 				approvals.Close()
 				return nil, fmt.Errorf("scan request approval: %w", err)
 			}
-			approval.CanRespond = request.Status == "pending_review" && approval.Decision == "pending" && approval.LeaderID == userID
+			if leaderID.Valid {
+				approval.LeaderID = int(leaderID.Int64)
+			}
+			approval.CanRespond = request.Status == "pending_review" && approval.Decision == "pending" &&
+				((leaderID.Valid && approval.LeaderID == userID) || (!leaderID.Valid && isAdmin))
 			request.Approvals = append(request.Approvals, approval)
 		}
 		if err := approvals.Err(); err != nil {
@@ -226,7 +235,8 @@ func GetRequest(db *sql.DB, requestID int64) (Request, error) {
 	return request, nil
 }
 
-// Respond records the leader's vote. ready is true when all required leaders approved.
+// Respond records an assigned leader's vote or an Admin fallback vote.
+// ready is true when all required approvals have been recorded.
 func Respond(db *sql.DB, requestID int64, userID int, userName, decision, comment string) (ready, rejected bool, err error) {
 	if decision != "approved" && decision != "rejected" {
 		return false, false, errors.New("decision must be approved or rejected")
@@ -243,20 +253,39 @@ func Respond(db *sql.DB, requestID int64, userID int, userName, decision, commen
 	if status != "pending_review" {
 		return false, false, errors.New("request is not awaiting approval")
 	}
+	var adminFallback bool
+	if err := tx.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM migration_change_approvals
+			WHERE request_id=$1 AND leader_user_id IS NULL AND decision='pending'
+		) AND EXISTS (
+			SELECT 1 FROM users WHERE id=$2 AND (is_admin OR role='Admin')
+		)`, requestID, userID).Scan(&adminFallback); err != nil {
+		return false, false, err
+	}
 	result, err := tx.Exec(`
 		UPDATE migration_change_approvals SET decision=$1, comment=$2, responded_at=NOW()
-		WHERE request_id=$3 AND leader_user_id=$4 AND decision='pending'`, decision, strings.TrimSpace(comment), requestID, userID)
+		WHERE request_id=$3 AND decision='pending'
+		  AND (leader_user_id=$4 OR (
+			leader_user_id IS NULL AND EXISTS (
+				SELECT 1 FROM users WHERE id=$4 AND (is_admin OR role='Admin')
+			)
+		  ))`, decision, strings.TrimSpace(comment), requestID, userID)
 	if err != nil {
 		return false, false, err
 	}
 	updated, err := result.RowsAffected()
-	if err != nil || updated != 1 {
+	if err != nil || updated < 1 {
 		if err != nil {
 			return false, false, err
 		}
-		return false, false, errors.New("only the assigned group leader can approve this request")
+		return false, false, errors.New("only an assigned group leader or an Admin fallback can approve this request")
 	}
-	if err := insertEvent(tx, requestID, "leader_"+decision, userID, userName, "Group leader decision"); err != nil {
+	eventStatus, eventNote := "leader_"+decision, "Group leader decision"
+	if adminFallback {
+		eventStatus, eventNote = "admin_fallback_"+decision, "Administrator fallback decision"
+	}
+	if err := insertEvent(tx, requestID, eventStatus, userID, userName, eventNote); err != nil {
 		return false, false, err
 	}
 	var pending int
@@ -270,7 +299,7 @@ func Respond(db *sql.DB, requestID int64, userID int, userName, decision, commen
 		if _, err := tx.Exec(`UPDATE migration_change_requests SET status='rejected', updated_at=NOW() WHERE id=$1`, requestID); err != nil {
 			return false, false, err
 		}
-		if err := insertEvent(tx, requestID, "rejected", userID, userName, "A required group leader rejected the request"); err != nil {
+		if err := insertEvent(tx, requestID, "rejected", userID, userName, "A required approver rejected the request"); err != nil {
 			return false, false, err
 		}
 		rejected = true
@@ -278,7 +307,7 @@ func Respond(db *sql.DB, requestID int64, userID int, userName, decision, commen
 		if _, err := tx.Exec(`UPDATE migration_change_requests SET status='approved', updated_at=NOW() WHERE id=$1`, requestID); err != nil {
 			return false, false, err
 		}
-		if err := insertEvent(tx, requestID, "approved", userID, userName, "All required group leaders approved"); err != nil {
+		if err := insertEvent(tx, requestID, "approved", userID, userName, "All required approvers approved"); err != nil {
 			return false, false, err
 		}
 		ready = true

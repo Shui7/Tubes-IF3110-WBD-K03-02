@@ -44,11 +44,13 @@ func loadRequiredApprovals(tx *sql.Tx, databaseID int) ([]requiredApproval, erro
 		return nil, fmt.Errorf("iterate approval groups: %w", err)
 	}
 	if len(required) == 0 {
-		return nil, errors.New("database has no access groups; configure at least one group and leader before requesting a migration")
+		return nil, errors.New("database has no access groups; configure at least one access group before requesting a migration")
 	}
-	for _, approval := range required {
+	for i := range required {
+		approval := &required[i]
 		if !approval.leader.Valid {
-			return nil, fmt.Errorf("group %q does not have an assigned leader", approval.group)
+			approval.name = "Admin fallback (leader unassigned)"
+			continue
 		}
 		if approval.name == "" {
 			return nil, fmt.Errorf("leader for group %q could not be found", approval.group)
@@ -147,13 +149,13 @@ func CreateResumeRequest(db *sql.DB, jobID string, requesterID int, requesterNam
 	if err != nil {
 		return Request{}, fmt.Errorf("create batch resume approval request: %w", err)
 	}
-	if err := insertEvent(tx, request.ID, "pending_review", requesterID, requesterName, "Batch continuation submitted for group leader approval"); err != nil {
+	if err := insertEvent(tx, request.ID, "pending_review", requesterID, requesterName, "Batch continuation submitted for required approval"); err != nil {
 		return Request{}, err
 	}
 	for _, approval := range required {
 		if _, err := tx.Exec(`
 			INSERT INTO migration_change_approvals (request_id, group_id, group_name, leader_user_id, leader_name)
-			VALUES ($1,$2,$3,$4,$5)`, request.ID, approval.groupID, approval.group, approval.leader.Int64, approval.name); err != nil {
+			VALUES ($1,$2,$3,$4,$5)`, request.ID, approval.groupID, approval.group, approval.leader, approval.name); err != nil {
 			return Request{}, fmt.Errorf("create batch resume approval: %w", err)
 		}
 	}
