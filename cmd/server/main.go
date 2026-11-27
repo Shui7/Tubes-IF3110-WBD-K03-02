@@ -309,7 +309,7 @@ func databases(w http.ResponseWriter, r *http.Request) {
 		handleMigration(id, operation, w, r)
 		return
 	}
-	handleMigration(id, w, r)
+	handleMigration(id, "", w, r)
 }
 
 func apiDatabases(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +343,7 @@ func apiDatabaseDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
-	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, id)
+	level, err := authz.GetUserDatabaseAccess(r.Context(), platformDB, sess.UserID, id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Unable to check database access"})
 		return
