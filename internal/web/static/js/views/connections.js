@@ -2,7 +2,8 @@ import { createErrorDiv, createSuccessDiv } from "./components.js"
 import { apiFetch, fetchJsonArray } from "./utils.js"
 
 export async function renderConnectionsTab() {
-    const container = document.getElementById("content")
+    const container = document.getElementById("admin-container")
+    container.replaceChildren()
 
     let connectionsTab = document.createElement("section")
     connectionsTab.id = "tab-connections"

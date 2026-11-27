@@ -3,7 +3,8 @@ import { apiFetch, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderUsersTab() {
-    const container = document.getElementById("content")
+    const container = document.getElementById("admin-container")
+    container.replaceChildren()
 
     let usersTab = document.createElement("section")
     usersTab.id = "tab-users"

@@ -3,7 +3,8 @@ import { apiFetch, fetchJsonArray } from "./utils.js"
 import { createErrorDiv, createSuccessDiv } from "./components.js"
 
 export async function renderGroupsTab() {
-     const container = document.getElementById("content")
+    const container = document.getElementById("admin-container")
+    container.replaceChildren()
 
     let groupsTab = document.createElement("section")
     groupsTab.id = "tab-groups"

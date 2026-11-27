@@ -77,6 +77,10 @@ export async function renderAdminView() {
 
     adminTabs.append(connectionsTab, groupsTab, usersTab)
 
+    let adminContainer = document.createElement("div")
+    adminContainer.id = "admin-container"
+    container.append(adminContainer)
+
     let activeTab = window.location.hash.slice(1) || "connections"
     if (activeTab === "connections") {
         connectionsTab.classList.add("active")
