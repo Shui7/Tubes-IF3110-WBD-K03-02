@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/authz"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbplatform"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/jobs"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/web"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
@@ -25,6 +27,7 @@ import (
 )
 
 var platformDB *sql.DB
+var jobStore *jobs.Store
 var authHandler *auth.AuthHandler
 var authMiddleware *auth.AuthMiddleware
 
@@ -73,6 +76,11 @@ func main() {
 		} else {
 			platformDB = db
 			slog.Info("platformdb.initialized")
+			if err := jobs.EnsureSchema(ctx, db); err != nil {
+				slog.ErrorContext(ctx, "jobs.schema_failed", "error", err)
+				return
+			}
+			jobStore = jobs.NewStore(db).WithMaxPending(envPositiveInt("MAX_PENDING_JOBS_PER_DB", jobs.DefaultMaxPendingPerDatabase))
 		}
 	} else {
 		slog.Error("config.missing_database_url")
@@ -118,6 +126,9 @@ func main() {
 	http.Handle("/admin/users/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
+	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
+	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(
+		requireCSRFHeader(jobs.ResumeHandler(jobStore, canViewDatabase, canEditDatabase))))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 
@@ -403,15 +414,39 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(id), http.StatusSeeOther)
 		return
 	}
+	back := "/databases/" + strconv.Itoa(id)
 	session, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
 	if session == nil || platformDB == nil {
 		http.Error(w, "Unable to create migration request", http.StatusInternalServerError)
+		return
+	}
+	if jobStore == nil {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("migration queue is unavailable")+"#migrations", http.StatusSeeOther)
 		return
 	}
 	action := operation
 	if action == "" {
 		action = "up"
 	}
+	mode := strings.TrimSpace(r.FormValue("mode"))
+	if mode == "" {
+		mode = jobs.ModePlain
+	}
+	if action != "up" && mode != jobs.ModePlain {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("rollback and forward must use plain mode")+"#migrations", http.StatusSeeOther)
+		return
+	}
+	batchSize := 0
+	if raw := strings.TrimSpace(r.FormValue("batch_size")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil {
+			http.Redirect(w, r, back+"?error="+url.QueryEscape("batch size must be a number")+"#migrations", http.StatusSeeOther)
+			return
+		}
+		batchSize = parsed
+	}
+	batchTable := strings.TrimSpace(r.FormValue("batch_table"))
+	batchColumn := strings.TrimSpace(r.FormValue("batch_column"))
 	var sqlUp, sqlDown, reason string
 	var irreversible bool
 	var targetID int64
@@ -421,32 +456,81 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 	} else {
 		var parseErr error
 		targetID, parseErr = strconv.ParseInt(r.FormValue("execution_id"), 10, 64)
-		if parseErr != nil {
-			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape("invalid target execution ID")+"#migrations", http.StatusSeeOther)
+		if parseErr != nil || targetID < 1 {
+			http.Redirect(w, r, back+"?error="+url.QueryEscape("invalid target execution ID")+"#migrations", http.StatusSeeOther)
 			return
 		}
 		manager, _, openErr := openManagedDatabase(r.Context(), id)
 		if openErr != nil {
-			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(openErr.Error())+"#migrations", http.StatusSeeOther)
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(openErr.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
 		target, loadErr := manager.GetMigrationExecution(r.Context(), targetID)
 		_ = manager.Close()
 		if loadErr != nil {
-			http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(loadErr.Error())+"#migrations", http.StatusSeeOther)
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(loadErr.Error())+"#migrations", http.StatusSeeOther)
 			return
 		}
 		sqlUp, sqlDown = target.SQL, target.SQLDown
+		irreversible, reason = target.Irreversible, nullStringValue(target.IrreversibleReason)
 	}
-	request, err := workflow.CreateRequest(platformDB, id, session.UserID, session.Name, action, sqlUp, sqlDown, irreversible, reason, targetID)
+	if mode == jobs.ModeBatch {
+		if err := jobs.ValidateBatchRequest(mode, batchSize, sqlUp, batchTable, batchColumn); err != nil {
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+			return
+		}
+	}
+	request, err := workflow.CreateRequest(platformDB, id, session.UserID, session.Name, action, sqlUp, sqlDown, irreversible, reason, targetID, mode, batchSize, batchTable, batchColumn)
 	if err != nil {
 		slog.WarnContext(r.Context(), "migration.request_rejected", "database_id", id, "action", action, "user_id", session.UserID, "error", err)
-		http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
+		http.Redirect(w, r, back+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
 	slog.InfoContext(r.Context(), "migration.requested", "request_id", request.ID, "database_id", id, "action", action, "user_id", session.UserID, "user", session.Name, "target_execution_id", targetID)
 	message := fmt.Sprintf("Migration change request #%d submitted for group leader approval.", request.ID)
-	http.Redirect(w, r, "/databases/"+strconv.Itoa(id)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+	http.Redirect(w, r, back+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
+}
+
+func envPositiveInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
+
+// canViewDatabase reports whether the logged-in user has at least view access.
+func canViewDatabase(r *http.Request, databaseID int) bool {
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if sess == nil || platformDB == nil {
+		return false
+	}
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
+	return err == nil && level != authz.AccessNone
+}
+
+// canEditDatabase reports whether the logged-in user has view+edit access.
+func canEditDatabase(r *http.Request, databaseID int) bool {
+	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+	if sess == nil || platformDB == nil {
+		return false
+	}
+	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
+	return err == nil && level == authz.AccessEdit
+}
+
+// requireCSRFHeader protects state-changing JSON endpoints: the request must carry
+// the session's CSRF token in the X-CSRF-Token header.
+func requireCSRFHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+		token := r.Header.Get("X-CSRF-Token")
+		if sess == nil || sess.CSRFToken == "" ||
+			subtle.ConstantTimeCompare([]byte(token), []byte(sess.CSRFToken)) != 1 {
+			http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWriter, r *http.Request) {
@@ -466,6 +550,7 @@ func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWri
 	decision := r.FormValue("decision")
 	allApproved := false
 	rejected := false
+	queuedJobID := ""
 	if err == nil {
 		var ready, wasRejected bool
 		ready, wasRejected, err = workflow.Respond(platformDB, requestID, session.UserID, session.Name, decision, r.FormValue("comment"))
@@ -476,7 +561,11 @@ func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWri
 			if rejected {
 				slog.WarnContext(r.Context(), "migration.request_rejected_by_leader", "request_id", requestID, "database_id", databaseID, "approver_user_id", session.UserID)
 			} else if ready {
-				err = executeApprovedMigration(r.Context(), request, session.UserID, session.Name)
+				var queuedJob jobs.Job
+				queuedJob, err = executeApprovedMigration(r.Context(), request, session.UserID, session.Name)
+				if err == nil {
+					queuedJobID = queuedJob.ID
+				}
 			}
 		}
 	}
@@ -488,7 +577,7 @@ func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWri
 	if rejected {
 		message = "Migration change request rejected."
 	} else if allApproved {
-		message = "All required leaders approved the request; execution finished."
+		message = "All required leaders approved the request; it was queued as job " + queuedJobID + "."
 	}
 	http.Redirect(w, r, "/databases/"+strconv.Itoa(databaseID)+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
 }
@@ -505,6 +594,7 @@ func convertChangeRequests(requests []workflow.Request) []web.MigrationChangeReq
 			ID: request.ID, Action: request.Action, RequesterName: request.RequesterName, Status: request.Status,
 			TargetExecutionID: targetID, SQLUp: request.SQLUp, SQLDown: request.SQLDown,
 			Irreversible: request.Irreversible, IrreversibleReason: request.IrreversibleReason,
+			Mode: request.Mode, BatchSize: request.BatchSize, BatchTable: request.BatchTable, BatchColumn: request.BatchColumn,
 			Error: nullStringValue(request.Error), CreatedAt: createdAt,
 		}
 		for _, approval := range request.Approvals {
@@ -524,65 +614,55 @@ func convertChangeRequests(requests []workflow.Request) []web.MigrationChangeReq
 	return items
 }
 
-func executeApprovedMigration(ctx context.Context, request workflow.Request, approverID int, approverName string) error {
-	if err := workflow.SetStatus(platformDB, request.ID, "pending_queue", approverID, approverName, "All required approvals received"); err != nil {
-		return err
+func executeApprovedMigration(ctx context.Context, request workflow.Request, approverID int, approverName string) (jobs.Job, error) {
+	if jobStore == nil {
+		return jobs.Job{}, errors.New("migration queue is unavailable")
 	}
-	slog.InfoContext(ctx, "migration.pending_queue", "request_id", request.ID, "database_id", request.DatabaseID, "action", request.Action)
-	if err := workflow.SetStatus(platformDB, request.ID, "running", approverID, approverName, "Execution started"); err != nil {
-		return err
+	if err := workflow.SetStatus(platformDB, request.ID, "pending_queue", approverID, approverName, "All required approvals received; enqueueing execution"); err != nil {
+		return jobs.Job{}, err
 	}
-	manager, _, err := openManagedDatabase(ctx, request.DatabaseID)
-	if err != nil {
-		_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
-		sqlForRequest := request.SQLUp
-		if request.Action == "rollback" {
-			sqlForRequest = request.SQLDown
+	sqlToRun := request.SQLUp
+	version := int64(0)
+	if request.Action == "rollback" {
+		sqlToRun = request.SQLDown
+	}
+	if request.Action != "up" {
+		if !request.TargetExecutionID.Valid {
+			err := errors.New("migration request has no target execution ID")
+			_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+			return jobs.Job{}, err
 		}
-		slog.ErrorContext(ctx, "migration.execution_failed", "request_id", request.ID, "database_id", request.DatabaseID, "action", request.Action, "user_id", approverID, "target_execution_id", request.TargetExecutionID, "sql", sqlForRequest, "error", err)
-		return err
-	}
-	defer manager.Close()
-
-	var sqlRun string
-	var version int64
-	if request.Action == "up" {
-		version, err = manager.NextMigrationVersion(ctx)
-		sqlRun = request.SQLUp
-	} else {
+		manager, _, err := openManagedDatabase(ctx, request.DatabaseID)
+		if err != nil {
+			_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+			return jobs.Job{}, err
+		}
 		var target dbmanager.Migration
 		target, err = manager.GetMigrationExecution(ctx, request.TargetExecutionID.Int64)
-		if err == nil {
-			version = target.Version
-			if request.Action == "rollback" {
-				sqlRun = target.SQLDown
-			} else {
-				sqlRun = target.SQL
-			}
+		_ = manager.Close()
+		if err != nil {
+			_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+			return jobs.Job{}, err
 		}
+		version = target.Version
 	}
-	slog.InfoContext(ctx, "migration.execution_started", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun)
-	if err == nil {
-		switch request.Action {
-		case "up":
-			err = manager.ExecuteMigrationDefinition(ctx, version, request.SQLUp, request.SQLDown, request.Irreversible, request.IrreversibleReason, approverName)
-		case "rollback":
-			err = manager.RollbackMigration(ctx, request.TargetExecutionID.Int64, approverName)
-		case "forward":
-			err = manager.ForwardMigration(ctx, request.TargetExecutionID.Int64, approverName)
-		}
-	}
+	job, err := jobStore.Enqueue(ctx, jobs.EnqueueRequest{
+		DatabaseID: request.DatabaseID, Kind: request.Action, Mode: request.Mode,
+		BatchSize: request.BatchSize, BatchTable: request.BatchTable, BatchColumn: request.BatchColumn,
+		Name: fmt.Sprintf("Migration request #%d", request.ID), SQL: sqlToRun,
+		SQLDown: request.SQLDown, Irreversible: request.Irreversible, IrreversibleReason: request.IrreversibleReason,
+		TargetExecutionID: request.TargetExecutionID.Int64, WorkflowRequestID: request.ID,
+		Version: version, RequestedBy: request.RequesterName, RequestID: observability.RequestIDFromContext(ctx),
+	})
 	if err != nil {
 		_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
-		slog.ErrorContext(ctx, "migration.execution_failed", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun, "error", err)
-		return err
+		slog.ErrorContext(ctx, "migration.enqueue_failed", "request_id", request.ID, "database_id", request.DatabaseID, "action", request.Action, "error", err)
+		return jobs.Job{}, err
 	}
-	slog.InfoContext(ctx, "migration.execution_succeeded", "request_id", request.ID, "database_id", request.DatabaseID, "version", version, "action", request.Action, "user_id", approverID, "user", approverName, "target_execution_id", request.TargetExecutionID, "sql", sqlRun)
-	if err := workflow.SetStatus(platformDB, request.ID, "success", approverID, approverName, "Execution completed"); err != nil {
-		slog.ErrorContext(ctx, "migration.workflow_status_update_failed", "request_id", request.ID, "database_id", request.DatabaseID, "status", "success", "error", err)
-		return err
-	}
-	return nil
+	slog.InfoContext(ctx, "migration.pending_queue", "request_id", request.ID, "job_id", job.ID,
+		"database_id", request.DatabaseID, "action", request.Action, "mode", request.Mode,
+		"batch_size", request.BatchSize, "batch_table", request.BatchTable, "batch_column", request.BatchColumn)
+	return job, nil
 }
 
 func convertColumns(columns []dbmanager.Column) []web.ColumnItem {

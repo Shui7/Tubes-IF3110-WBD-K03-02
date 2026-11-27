@@ -4,10 +4,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/worker ./cmd/worker
 
 FROM alpine:3.19
 WORKDIR /app
 COPY --from=builder /bin/server /app/server
+COPY --from=builder /bin/worker /app/worker
 COPY --from=builder /src/internal/web/static /app/static
 
 EXPOSE 8080
