@@ -375,6 +375,21 @@ async function renderPermissionsTable(groupsTab) {
     dbSelectDefaultOption.textContent = "-- Select Database --"
     dbSelect.append(dbSelectDefaultOption)
 
+    let accessSelectDefaultOption = document.createElement("option")
+    accessSelectDefaultOption.value = ""
+    accessSelectDefaultOption.textContent = "-- Select Access Level --"
+    accessSelect.append(accessSelectDefaultOption)
+
+    let accessSelectViewOption = document.createElement("option")
+    accessSelectViewOption.value = "view"
+    accessSelectViewOption.textContent = "View Only"
+    accessSelect.append(accessSelectViewOption)
+
+    let accessSelectEditOption = document.createElement("option")
+    accessSelectEditOption.value = "edit"
+    accessSelectEditOption.textContent = "View + Edit"
+    accessSelect.append(accessSelectEditOption)
+
     let connections = await fetchConnections()
     for (let connection of connections) {
         let connectionOption = document.createElement("option")
