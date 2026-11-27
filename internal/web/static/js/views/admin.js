@@ -41,7 +41,7 @@ export async function renderAdminView() {
 
     let connectionsTab = document.createElement("a")
     connectionsTab.classList.add("tab-link")
-    connectionsTab.textContent = "Database Conections"
+    connectionsTab.textContent = "Database Connections"
     connectionsTab.dataTab = "connections"
     connectionsTab.addEventListener("click", async (event) => {
         event.preventDefault()
