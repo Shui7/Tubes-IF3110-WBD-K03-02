@@ -67,7 +67,6 @@ func (v ExecutionValidator) Validate(ctx context.Context, job ExecutionJob) erro
 	if err != nil {
 		return fmt.Errorf("open migration target database: %w", err)
 	}
-	defer manager.Close()
 
 	target, err := manager.ValidateMigrationAction(ctx, job.TargetExecutionID.Int64, request.Action)
 	if err != nil {

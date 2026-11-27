@@ -586,7 +586,7 @@ func handleMigration(id int, operation string, w http.ResponseWriter, r *http.Re
 	logValidation("approval_request", nil, "request_id", request.ID, "sql_bytes", len(sqlUp),
 		"irreversible", irreversible, "sql_validation", "deferred_until_execution")
 	slog.InfoContext(r.Context(), "migration.requested", "request_id", request.ID, "database_id", id, "action", action, "user_id", session.UserID, "user", session.Name, "target_execution_id", targetID)
-	message := fmt.Sprintf("Migration change request #%d submitted for group leader approval.", request.ID)
+	message := fmt.Sprintf("Migration change request #%d submitted for approval.", request.ID)
 	http.Redirect(w, r, back+"?success="+url.QueryEscape(message)+"#migrations", http.StatusSeeOther)
 }
 
@@ -687,7 +687,7 @@ func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWri
 		http.Redirect(w, r, "/databases/"+strconv.Itoa(databaseID)+"?error="+url.QueryEscape(err.Error())+"#migrations", http.StatusSeeOther)
 		return
 	}
-	message := "Approval recorded. The request is waiting for the remaining group leaders."
+	message := "Approval recorded. The request is waiting for the remaining required approvers."
 	if rejected {
 		message = "Migration change request rejected."
 	} else if allApproved {

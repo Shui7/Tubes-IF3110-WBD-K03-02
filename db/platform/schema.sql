@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS migration_change_approvals (
     request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,
     group_id INT NOT NULL,
     group_name TEXT NOT NULL,
-    leader_user_id INT NOT NULL,
+    leader_user_id INT,
     leader_name TEXT NOT NULL,
     decision TEXT NOT NULL DEFAULT 'pending' CHECK (decision IN ('pending', 'approved', 'rejected')),
     comment TEXT NOT NULL DEFAULT '',

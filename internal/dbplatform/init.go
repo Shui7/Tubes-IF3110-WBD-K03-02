@@ -157,13 +157,14 @@ var migrations = []string{
 		request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,
 		group_id INT NOT NULL,
 		group_name TEXT NOT NULL,
-		leader_user_id INT NOT NULL,
+		leader_user_id INT,
 		leader_name TEXT NOT NULL,
 		decision TEXT NOT NULL DEFAULT 'pending' CHECK (decision IN ('pending', 'approved', 'rejected')),
 		comment TEXT NOT NULL DEFAULT '',
 		responded_at TIMESTAMPTZ,
 		UNIQUE (request_id, group_id)
 	)`,
+	"ALTER TABLE migration_change_approvals ALTER COLUMN leader_user_id DROP NOT NULL",
 	`CREATE TABLE IF NOT EXISTS migration_change_events (
 		id BIGSERIAL PRIMARY KEY,
 		request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,

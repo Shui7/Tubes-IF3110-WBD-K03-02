@@ -20,7 +20,7 @@ SELECT g,
        (((g * 7919) % 100000)::numeric / 100)::numeric(12,2),
        md5(g::text) || md5((g * 7)::text),
        TIMESTAMPTZ '2026-01-01 00:00:00+00' + ((g % 31536000)::int * INTERVAL '1 second')
-FROM generate_series(1, 3000000) AS g;
+FROM generate_series(1::bigint, 3000000::bigint) AS g;
 
 -- Secondary indexes make a full-table UPDATE slower (every new row version is indexed again)
 CREATE INDEX bulk_orders_customer_idx ON bulk_orders (customer_id);

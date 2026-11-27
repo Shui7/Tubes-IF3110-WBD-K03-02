@@ -61,6 +61,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-host=dbplatform port=5432 dbname=dbplatform user=postgres password=postgres sslmode=disable}
       ADDR: ${ADDR:-:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       MAX_PENDING_JOBS_PER_DB: ${MAX_PENDING_JOBS_PER_DB:-100}
     ports:
       - "${APP_PORT:-8080}:8080"
