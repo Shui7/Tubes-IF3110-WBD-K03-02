@@ -10,21 +10,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type ctxKey int
-
-const requestIDKey ctxKey = iota
-
-// Store corelation ID in context. Called by middleware HTTP
-// and worker when taking a job (use request_id from job column).
-func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey, id)
-}
-
-func RequestIDFromContext(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey).(string)
-	return id
-}
-
 type contextHandler struct {
 	inner slog.Handler
 }

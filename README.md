@@ -103,3 +103,41 @@ go test ./...
 ```
 
 The platform schema is in [`db/platform/schema.sql`](db/platform/schema.sql). Sample database SQL files are loaded by [`db/init-samples.sh`](db/init-samples.sh) when the sample database volume is initialized for the first time.
+
+## Activity logs and tracing
+
+The HTTP server assigns each request a fresh `X-Request-ID`. The ID is included
+in application logs and is stored with queued jobs so worker events can be
+correlated with the request that created them. Passwords, session identifiers,
+CSRF tokens, query parameter values, and returned row data are not logged.
+Database query events include the redacted statement, parameter types, elapsed
+time, affected/returned row count, and PostgreSQL SQLSTATE on failure. Commit
+and rollback outcomes are recorded as separate transaction events.
+
+`OTEL_EXPORTER` controls span output:
+
+| Value | Behavior |
+| --- | --- |
+| `console` (default) | Write spans to standard error |
+| `otlp` | Export spans to the configured OpenTelemetry Collector |
+| `none` | Create spans without exporting them |
+
+Example application log:
+
+```json
+{"time":"2026-11-27T10:00:00Z","level":"INFO","event":"db.query.completed","service":"app","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","request_id":"b7d1b3d61289490bb876772e0e2e8b2a","operation":"table.count","query":"SELECT COUNT(*) FROM \"public\".\"items\"","parameters":[],"duration_ms":3,"rows":1,"ok":true}
+```
+
+Representative console span (the SDK's exact formatting may vary):
+
+```text
+Name: db.query
+Trace ID: 4bf92f3577b34da6a3ce929d0e0e4736
+Span ID: 00f067aa0ba902b7
+Attributes:
+  db.system = postgresql
+  db.operation = table.count
+  db.statement = SELECT COUNT(*) FROM "public"."items"
+  db.rows_affected = 1
+  db.duration_ms = 3
+```

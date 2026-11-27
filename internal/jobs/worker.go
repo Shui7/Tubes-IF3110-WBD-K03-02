@@ -126,6 +126,7 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 		attribute.Int("database.id", job.DatabaseID),
 		attribute.Int("job.attempt", job.Attempt),
 		attribute.String("job.kind", job.Kind),
+		attribute.String("request.id", job.RequestID),
 	))
 	defer span.End()
 

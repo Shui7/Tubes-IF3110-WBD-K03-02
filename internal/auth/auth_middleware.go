@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 )
 
@@ -25,6 +26,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 1. Ambil cookie session_id dari request
 		cookie, err := r.Cookie("session_id")
 		if err != nil {
+			slog.WarnContext(r.Context(), "auth.session.rejected", "reason", "missing_session")
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
@@ -32,12 +34,15 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		// 2. Validasi sesi melalui SessionStore (mengecek idle timeout, absolute expiration, & grace period)[cite: 1]
 		session, err := m.sessionStore.GetSession(cookie.Value)
 		if err != nil {
+			slog.WarnContext(r.Context(), "auth.session.rejected", "reason", "invalid_or_expired_session")
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
 
 		// 3. Perbarui last_accessed_at (mencegah idle timeout jika pengguna aktif)[cite: 1]
-		_ = m.sessionStore.TouchSession(session.ID)
+		if err := m.sessionStore.TouchSession(session.ID); err != nil {
+			slog.WarnContext(r.Context(), "auth.session.touch_failed", "user_id", session.UserID, "error", err)
+		}
 
 		// 4. Proteksi CSRF untuk request yang mengubah state (POST, PUT, DELETE, PATCH)[cite: 1]
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch {

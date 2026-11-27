@@ -122,15 +122,22 @@ func (m *Manager) ExecuteBatch(ctx context.Context, executionID string, batchNo 
 	if err != nil {
 		return BatchStep{}, fmt.Errorf("begin batch %d: %w", batchNo, err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "batch.execute")
 
 	var next sql.NullString
 	var rows int64
-	if err := tx.QueryRowContext(ctx, batchSQL, cursor, size).Scan(&next, &rows); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	row, finish := queryRowObserved(ctx, tx, "batch.execute", batchSQL, cursor, size)
+	scanErr := row.Scan(&next, &rows)
+	returnedRows := int64(0)
+	if scanErr == nil {
+		returnedRows = 1
+	}
+	finish(returnedRows, scanErr)
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
 			return BatchStep{}, fmt.Errorf("batch %d: %w: the SQL returned no row (it must return next cursor and row count)", batchNo, ErrInvalidBatchResult)
 		}
-		return BatchStep{}, fmt.Errorf("execute batch %d: %w", batchNo, err)
+		return BatchStep{}, fmt.Errorf("execute batch %d: %w", batchNo, scanErr)
 	}
 
 	if rows < 0 {
@@ -151,7 +158,7 @@ func (m *Manager) ExecuteBatch(ctx context.Context, executionID string, batchNo 
 		VALUES ($1, $2, $3, $4, $5)`, executionID, batchNo, cursor, next, rows); err != nil {
 		return BatchStep{}, fmt.Errorf("write checkpoint for batch %d: %w", batchNo, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "batch.execute"); err != nil {
 		return BatchStep{}, &CommitError{Batch: batchNo, Err: err}
 	}
 	return BatchStep{Cursor: next, Rows: rows}, nil
@@ -199,7 +206,7 @@ func (m *Manager) RecordMigrationSuccessDefinitionWithMetadata(ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("begin migration record: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.batch_history")
 
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return fmt.Errorf("lock migration history: %w", err)
@@ -242,7 +249,7 @@ func (m *Manager) RecordMigrationSuccessDefinitionWithMetadata(ctx context.Conte
 		metadata.RequestID, migrationRevision(metadata), executedBy); err != nil {
 		return fmt.Errorf("record migration %d: %w", version, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "migration.batch_history"); err != nil {
 		return &CommitError{Version: version, Err: err}
 	}
 	return nil
@@ -320,10 +327,20 @@ func (m *Manager) ExecuteAttributeBatch(ctx context.Context, executionID string,
 	if err != nil {
 		return BatchStep{}, fmt.Errorf("begin batch %d: %w", batchNo, err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "batch.execute_attribute")
 
 	var upper sql.NullString
-	err = tx.QueryRowContext(ctx, boundSQL, cursor, size).Scan(&upper)
+	row, finish := queryRowObserved(ctx, tx, "batch.bound", boundSQL, cursor, size)
+	err = row.Scan(&upper)
+	returnedRows := int64(0)
+	if err == nil {
+		returnedRows = 1
+	}
+	logErr := err
+	if errors.Is(err, sql.ErrNoRows) {
+		logErr = nil
+	}
+	finish(returnedRows, logErr)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !upper.Valid) {
 		return BatchStep{Cursor: cursor, Done: true}, nil // no rows after the cursor
 	}
@@ -331,7 +348,7 @@ func (m *Manager) ExecuteAttributeBatch(ctx context.Context, executionID string,
 		return BatchStep{}, fmt.Errorf("find bound of batch %d: %w", batchNo, err)
 	}
 
-	result, err := tx.ExecContext(ctx, statement, cursor, upper.String)
+	result, err := execObserved(ctx, tx, "batch.execute_attribute", statement, cursor, upper.String)
 	if err != nil {
 		return BatchStep{}, fmt.Errorf("execute batch %d: %w", batchNo, err)
 	}
@@ -345,7 +362,7 @@ func (m *Manager) ExecuteAttributeBatch(ctx context.Context, executionID string,
 		VALUES ($1, $2, $3, $4, $5)`, executionID, batchNo, cursor, upper, rows); err != nil {
 		return BatchStep{}, fmt.Errorf("write checkpoint for batch %d: %w", batchNo, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "batch.execute_attribute"); err != nil {
 		return BatchStep{}, &CommitError{Batch: batchNo, Err: err}
 	}
 	return BatchStep{Cursor: upper, Rows: rows}, nil

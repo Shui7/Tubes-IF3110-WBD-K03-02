@@ -200,7 +200,7 @@ func (m *Manager) ExecuteMigrationDefinitionWithMetadata(ctx context.Context, ve
 	if err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.execute")
 
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return fmt.Errorf("lock migration history: %w", err)
@@ -234,10 +234,11 @@ func (m *Manager) ExecuteMigrationDefinitionWithMetadata(ctx context.Context, ve
 	}
 	logMigrationValidation(ctx, "version_and_definition", "up", version, 0, metadata, nil)
 
-	if _, err := tx.ExecContext(ctx, sqlUp); err != nil {
+	if _, err := execObserved(ctx, tx, "migration.up", sqlUp); err != nil {
 		slog.ErrorContext(ctx, "migration.sql_execution.failed", "migration_version", version,
-			"job_id", nullStringText(metadata.JobID), "sql_bytes", len(sqlUp), "error", err)
-		_ = tx.Rollback()
+			"job_id", nullStringText(metadata.JobID), "sql_bytes", len(sqlUp),
+			"error", databaseErrorSummary(err), "sqlstate", databaseSQLState(err))
+		rollbackObserved(ctx, tx, "migration.execute")
 		recordErr := m.recordMigrationFailure(ctx, version, sqlUp, sqlDown, irreversible, irreversibleReason, executedBy, err.Error(), metadata)
 		if recordErr != nil {
 			return fmt.Errorf("execute migration %d: %w; record failure: %v", version, err, recordErr)
@@ -253,7 +254,7 @@ func (m *Manager) ExecuteMigrationDefinitionWithMetadata(ctx context.Context, ve
 	); err != nil {
 		return fmt.Errorf("record migration %d: %w", version, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "migration.execute"); err != nil {
 		return &CommitError{Version: version, Err: err}
 	}
 	return nil
@@ -315,7 +316,7 @@ func (m *Manager) ValidateMigrationAction(ctx context.Context, targetID int64, a
 		err = fmt.Errorf("begin %s validation: %w", action, err)
 		return Migration{}, logMigrationValidation(ctx, "action_preflight_transaction", action, 0, targetID, MigrationMetadata{}, err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.action_preflight")
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return Migration{}, fmt.Errorf("lock migration history: %w", err)
 	}
@@ -441,7 +442,7 @@ func (m *Manager) executeMigrationAction(ctx context.Context, targetID int64, ac
 	if err != nil {
 		return fmt.Errorf("begin %s transaction: %w", action, err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.action")
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return fmt.Errorf("lock migration history: %w", err)
 	}
@@ -455,7 +456,7 @@ func (m *Manager) executeMigrationAction(ctx context.Context, targetID int64, ac
 		if recordErr := insertActionAttempt(ctx, tx, target, targetID, action, executedBy, "failed", err.Error(), metadata); recordErr != nil {
 			return fmt.Errorf("%w; record rejected %s attempt: %v", err, action, recordErr)
 		}
-		if commitErr := tx.Commit(); commitErr != nil {
+		if commitErr := commitObserved(ctx, tx, "migration.action_rejected"); commitErr != nil {
 			return fmt.Errorf("%w; commit rejected %s attempt: %v", err, action, commitErr)
 		}
 		return err
@@ -467,17 +468,17 @@ func (m *Manager) executeMigrationAction(ctx context.Context, targetID int64, ac
 		if recordErr := insertActionAttempt(ctx, tx, target, targetID, action, executedBy, "failed", err.Error(), metadata); recordErr != nil {
 			return fmt.Errorf("%w; record rejected %s attempt: %v", err, action, recordErr)
 		}
-		if commitErr := tx.Commit(); commitErr != nil {
+		if commitErr := commitObserved(ctx, tx, "migration.action_rejected"); commitErr != nil {
 			return fmt.Errorf("%w; commit rejected %s attempt: %v", err, action, commitErr)
 		}
 		return err
 	}
 
-	if _, err := tx.ExecContext(ctx, sqlToRun); err != nil {
+	if _, err := execObserved(ctx, tx, "migration."+action, sqlToRun); err != nil {
 		slog.ErrorContext(ctx, "migration.sql_execution.failed", "migration_version", target.Version,
 			"action", action, "target_execution_id", targetID, "job_id", nullStringText(metadata.JobID),
-			"sql_bytes", len(sqlToRun), "error", err)
-		_ = tx.Rollback()
+			"sql_bytes", len(sqlToRun), "error", databaseErrorSummary(err), "sqlstate", databaseSQLState(err))
+		rollbackObserved(ctx, tx, "migration.action")
 		recordErr := m.recordActionAttempt(ctx, target, targetID, action, executedBy, "failed", err.Error(), metadata)
 		if recordErr != nil {
 			return fmt.Errorf("execute %s for migration %d: %w; record failure: %v", action, target.Version, err, recordErr)
@@ -487,7 +488,7 @@ func (m *Manager) executeMigrationAction(ctx context.Context, targetID int64, ac
 	if err := insertActionAttempt(ctx, tx, target, targetID, action, executedBy, "success", "", metadata); err != nil {
 		return fmt.Errorf("record %s for migration %d: %w", action, target.Version, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "migration.action"); err != nil {
 		return fmt.Errorf("commit %s for migration %d: %w", action, target.Version, err)
 	}
 	return nil
@@ -498,14 +499,14 @@ func (m *Manager) recordActionAttempt(ctx context.Context, target Migration, tar
 	if err != nil {
 		return fmt.Errorf("begin action history transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.action_history")
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return fmt.Errorf("lock migration history: %w", err)
 	}
 	if err := insertActionAttempt(ctx, tx, target, targetExecutionID, action, executedBy, status, message, metadata); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return commitObserved(ctx, tx, "migration.action_history")
 }
 
 func insertActionAttempt(ctx context.Context, tx *sql.Tx, target Migration, targetExecutionID int64, action, executedBy, status, message string, metadata MigrationMetadata) error {
@@ -577,7 +578,7 @@ func (m *Manager) recordMigrationFailure(ctx context.Context, version int64, sql
 	if err != nil {
 		return fmt.Errorf("begin failed migration record: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackObserved(ctx, tx, "migration.failure_history")
 
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('db_platform_migrations'))`); err != nil {
 		return fmt.Errorf("lock failed migration record: %w", err)
@@ -590,7 +591,7 @@ func (m *Manager) recordMigrationFailure(ctx context.Context, version int64, sql
 		migrationRevision(metadata), executedBy, message); err != nil {
 		return fmt.Errorf("record failed migration: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitObserved(ctx, tx, "migration.failure_history"); err != nil {
 		return fmt.Errorf("commit failed migration record: %w", err)
 	}
 	return nil

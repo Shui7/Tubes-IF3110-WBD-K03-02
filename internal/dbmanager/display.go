@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -13,7 +12,7 @@ var identifierPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
 
 /* displaying shi */
 func (m *Manager) ListSchemas(ctx context.Context) ([]Schema, error) {
-	rows, err := m.db.QueryContext(ctx, `
+	rows, finish, err := queryObserved(ctx, m.db, "schema.list", `
 		SELECT schema_name
 		FROM information_schema.schemata
 		WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
@@ -25,14 +24,20 @@ func (m *Manager) ListSchemas(ctx context.Context) ([]Schema, error) {
 	defer rows.Close()
 
 	var schemas []Schema
+	var rowCount int64
+	var queryErr error
+	defer func() { finish(rowCount, queryErr) }()
 	for rows.Next() {
 		var schema Schema
 		if err := rows.Scan(&schema.Name); err != nil {
+			queryErr = err
 			return nil, fmt.Errorf("scan schema: %w", err)
 		}
 		schemas = append(schemas, schema)
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("iterate schemas: %w", err)
 	}
 	return schemas, nil
@@ -43,7 +48,7 @@ func (m *Manager) ListTables(ctx context.Context, schema string) ([]Table, error
 		return nil, err
 	}
 
-	rows, err := m.db.QueryContext(ctx, `
+	rows, finish, err := queryObserved(ctx, m.db, "table.list", `
 		SELECT table_schema, table_name, table_type
 		FROM information_schema.tables
 		WHERE table_schema = $1
@@ -54,14 +59,20 @@ func (m *Manager) ListTables(ctx context.Context, schema string) ([]Table, error
 	defer rows.Close()
 
 	var tables []Table
+	var rowCount int64
+	var queryErr error
+	defer func() { finish(rowCount, queryErr) }()
 	for rows.Next() {
 		var table Table
 		if err := rows.Scan(&table.Schema, &table.Name, &table.Type); err != nil {
+			queryErr = err
 			return nil, fmt.Errorf("scan table: %w", err)
 		}
 		tables = append(tables, table)
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("iterate tables: %w", err)
 	}
 	return tables, nil
@@ -75,7 +86,7 @@ func (m *Manager) ListColumns(ctx context.Context, schema, table string) ([]Colu
 		return nil, err
 	}
 
-	rows, err := m.db.QueryContext(ctx, `
+	rows, finish, err := queryObserved(ctx, m.db, "column.list", `
 		SELECT table_schema, table_name, column_name, data_type,
 		       is_nullable = 'YES', column_default, ordinal_position
 		FROM information_schema.columns
@@ -87,17 +98,23 @@ func (m *Manager) ListColumns(ctx context.Context, schema, table string) ([]Colu
 	defer rows.Close()
 
 	var columns []Column
+	var rowCount int64
+	var queryErr error
+	defer func() { finish(rowCount, queryErr) }()
 	for rows.Next() {
 		var column Column
 		if err := rows.Scan(
 			&column.Schema, &column.Table, &column.Name, &column.DataType,
 			&column.IsNullable, &column.DefaultExpr, &column.Ordinal,
 		); err != nil {
+			queryErr = err
 			return nil, fmt.Errorf("scan column: %w", err)
 		}
 		columns = append(columns, column)
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("iterate columns: %w", err)
 	}
 	return columns, nil
@@ -116,7 +133,7 @@ func (m *Manager) ListTableDetails(ctx context.Context, schema string) ([]TableD
 		}
 		detail := TableDetails{Schema: table.Schema, Name: table.Name, Columns: columns}
 
-		rows, err := m.db.QueryContext(ctx, `
+		rows, finish, err := queryObserved(ctx, m.db, "constraint.list", `
 			SELECT c.conname, c.contype, pg_get_constraintdef(c.oid)
 			FROM pg_constraint c
 			JOIN pg_class t ON t.oid = c.conrelid
@@ -127,21 +144,29 @@ func (m *Manager) ListTableDetails(ctx context.Context, schema string) ([]TableD
 		if err != nil {
 			return nil, fmt.Errorf("list table constraints: %w", err)
 		}
+		var constraintCount int64
+		var constraintErr error
 		for rows.Next() {
 			var constraint Constraint
 			if err := rows.Scan(&constraint.Name, &constraint.Type, &constraint.Definition); err != nil {
+				constraintErr = err
+				finish(constraintCount, constraintErr)
 				rows.Close()
 				return nil, fmt.Errorf("scan table constraint: %w", err)
 			}
 			detail.Constraints = append(detail.Constraints, constraint)
+			constraintCount++
 		}
 		if err := rows.Err(); err != nil {
+			constraintErr = err
+			finish(constraintCount, constraintErr)
 			rows.Close()
 			return nil, fmt.Errorf("iterate table constraints: %w", err)
 		}
+		finish(constraintCount, nil)
 		rows.Close()
 
-		indexRows, err := m.db.QueryContext(ctx, `
+		indexRows, finishIndexes, err := queryObserved(ctx, m.db, "index.list", `
 			SELECT indexname, indexdef
 			FROM pg_indexes
 			WHERE schemaname = $1 AND tablename = $2
@@ -149,18 +174,26 @@ func (m *Manager) ListTableDetails(ctx context.Context, schema string) ([]TableD
 		if err != nil {
 			return nil, fmt.Errorf("list table indexes: %w", err)
 		}
+		var indexCount int64
+		var indexErr error
 		for indexRows.Next() {
 			var index Index
 			if err := indexRows.Scan(&index.Name, &index.Definition); err != nil {
+				indexErr = err
+				finishIndexes(indexCount, indexErr)
 				indexRows.Close()
 				return nil, fmt.Errorf("scan table index: %w", err)
 			}
 			detail.Indexes = append(detail.Indexes, index)
+			indexCount++
 		}
 		if err := indexRows.Err(); err != nil {
+			indexErr = err
+			finishIndexes(indexCount, indexErr)
 			indexRows.Close()
 			return nil, fmt.Errorf("iterate table indexes: %w", err)
 		}
+		finishIndexes(indexCount, nil)
 		indexRows.Close()
 		details = append(details, detail)
 	}
@@ -171,7 +204,7 @@ func (m *Manager) ListRelationships(ctx context.Context, schema string) ([]Relat
 	if err := validateIdentifier(schema); err != nil {
 		return nil, err
 	}
-	rows, err := m.db.QueryContext(ctx, `
+	rows, finish, err := queryObserved(ctx, m.db, "relationship.list", `
 		SELECT ns.nspname, ts.relname, asrc.attname,
 		       nt.nspname, tt.relname, atgt.attname
 		FROM pg_constraint c
@@ -191,17 +224,23 @@ func (m *Manager) ListRelationships(ctx context.Context, schema string) ([]Relat
 	defer rows.Close()
 
 	var relationships []Relationship
+	var rowCount int64
+	var queryErr error
+	defer func() { finish(rowCount, queryErr) }()
 	for rows.Next() {
 		var relationship Relationship
 		if err := rows.Scan(
 			&relationship.FromSchema, &relationship.FromTable, &relationship.FromColumn,
 			&relationship.ToSchema, &relationship.ToTable, &relationship.ToColumn,
 		); err != nil {
+			queryErr = err
 			return nil, fmt.Errorf("scan relationship: %w", err)
 		}
 		relationships = append(relationships, relationship)
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("iterate relationships: %w", err)
 	}
 	return relationships, nil
@@ -221,7 +260,14 @@ func (m *Manager) CountRows(ctx context.Context, schema, table string) (int64, e
 
 	var count int64
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s.%s", quoteIdentifier(schema), quoteIdentifier(table))
-	if err := m.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+	row, finish := queryRowObserved(ctx, m.db, "table.count", query)
+	err := row.Scan(&count)
+	loggedRows := int64(0)
+	if err == nil {
+		loggedRows = count
+	}
+	finish(loggedRows, err)
+	if err != nil {
 		return 0, fmt.Errorf("count rows: %w", err)
 	}
 	return count, nil
@@ -238,16 +284,20 @@ func (m *Manager) PreviewRowsPage(ctx context.Context, schema, table string, lim
 		return nil, errors.New("row limit must be between 1 and 1000 and offset must not be negative")
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s.%s ORDER BY ctid LIMIT %s OFFSET %s",
-		quoteIdentifier(schema), quoteIdentifier(table), strconv.Itoa(limit), strconv.Itoa(offset))
-	rows, err := m.db.QueryContext(ctx, query)
+	query := fmt.Sprintf("SELECT * FROM %s.%s ORDER BY ctid LIMIT $1 OFFSET $2",
+		quoteIdentifier(schema), quoteIdentifier(table))
+	rows, finish, err := queryObserved(ctx, m.db, "table.preview", query, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("preview rows: %w", err)
 	}
 	defer rows.Close()
+	var rowCount int64
+	var queryErr error
+	defer func() { finish(rowCount, queryErr) }()
 
 	columns, err := rows.Columns()
 	if err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("read row columns: %w", err)
 	}
 
@@ -259,6 +309,7 @@ func (m *Manager) PreviewRowsPage(ctx context.Context, schema, table string, lim
 			destinations[i] = &values[i]
 		}
 		if err := rows.Scan(destinations...); err != nil {
+			queryErr = err
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
 		row := make(Row, len(columns))
@@ -266,8 +317,10 @@ func (m *Manager) PreviewRowsPage(ctx context.Context, schema, table string, lim
 			row[column] = displayValue(values[i])
 		}
 		result = append(result, row)
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		return nil, fmt.Errorf("iterate rows: %w", err)
 	}
 	return result, nil

@@ -138,7 +138,7 @@ func main() {
 	}
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: otelhttp.NewHandler(http.DefaultServeMux, "http.server"),
+		Handler: otelhttp.NewHandler(observability.RequestIDMiddleware(http.DefaultServeMux), "http.server"),
 	}
 	slog.InfoContext(ctx, "server.listening", "addr", addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -183,11 +183,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("session_id"); err == nil && cookie.Value != "" && platformDB != nil {
-		_, _ = platformDB.Exec("UPDATE sessions SET is_revoked = TRUE WHERE id = $1", cookie.Value)
+	if authHandler == nil {
+		http.Error(w, "authentication unavailable", http.StatusInternalServerError)
+		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	authHandler.HandleLogout(w, r)
 }
 
 func adminPage(w http.ResponseWriter, r *http.Request) {
