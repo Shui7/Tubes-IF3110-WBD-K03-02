@@ -257,7 +257,7 @@ export async function renderConnectionsTab() {
         successAddDiv.hidden = true
 
         const host = hostInput.value.trim();
-        const port = portInput.value.trim();
+        const port = portInput.valueAsNumber;
         const database = databaseInput.value.trim();
         const username = databaseUsernameInput.value.trim();
         const password = databasePasswordInput.value.trim();
