@@ -114,6 +114,7 @@ func TestApprovalCreateRespondAndSetStatus(t *testing.T) {
 func TestAdminCanApproveLeaderlessGroupFallback(t *testing.T) {
 	db := openWorkflowIntegrationDB(t)
 	suffix := strings.ReplaceAll(newTestWorkflowID(), "-", "")
+	requesterName, adminName, databaseName := "requester_"+suffix, "admin_"+suffix, "fallback_"+suffix
 
 	var requesterID, adminID, databaseID, groupID int
 	if err := db.QueryRow(`
