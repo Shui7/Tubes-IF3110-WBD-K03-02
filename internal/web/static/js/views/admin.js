@@ -1,7 +1,7 @@
 import { createErrorDiv, setTitle } from "./components.js"
 import { renderConnectionsTab } from "./connections.js"
 import { renderGroupsTab } from "./groups.js"
-import { renderLoginView } from "./login.js"
+import { renderLoginView, renderNavRight } from "./login.js"
 import { renderUsersTab } from "./users.js"
 import { renderLoading, validateSession } from "./utils.js"
 
@@ -13,7 +13,7 @@ export async function renderAdminView() {
 
     setTitle("Platform Administration")
     await renderLoading()
-    renderNavRight()
+    awaitrenderNavRight()
 
     const container = document.getElementById("content")
     container.innerHTML = "";    

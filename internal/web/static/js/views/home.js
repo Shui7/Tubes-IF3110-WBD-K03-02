@@ -1,4 +1,4 @@
-import { renderLoginView } from "./login.js"
+import { renderLoginView, renderNavRight } from "./login.js"
 import { renderLoading, validateSession } from "./utils.js"
 
 export async function renderHome() {
@@ -9,7 +9,7 @@ export async function renderHome() {
 
     setTitle("Home")
     await renderLoading()
-    renderNavRight()
+    await renderNavRight()
     
     const container = document.getElementById("content")
     container.innerHTML = ""

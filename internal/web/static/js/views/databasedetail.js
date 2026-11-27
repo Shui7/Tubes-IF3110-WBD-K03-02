@@ -1,5 +1,5 @@
 import { createErrorDiv, createSuccessDiv, setTitle } from "./components.js"
-import { renderLoginView } from "./login.js"
+import { renderLoginView, renderNavRight } from "./login.js"
 import { apiFetch, renderLoading, validateSession } from "./utils.js"
 
 export async function renderDatabaseDetails(databaseId) {
@@ -10,7 +10,7 @@ export async function renderDatabaseDetails(databaseId) {
 
     setTitle("Databases")
     await renderLoading()
-    renderNavRight()
+    await renderNavRight()
 
 
     const container = document.getElementById("content")
