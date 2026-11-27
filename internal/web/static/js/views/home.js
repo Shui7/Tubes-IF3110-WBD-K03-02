@@ -1,3 +1,4 @@
+import { setTitle } from "./components.js"
 import { renderLoginView, renderNavRight } from "./login.js"
 import { renderLoading, validateSession } from "./utils.js"
 
