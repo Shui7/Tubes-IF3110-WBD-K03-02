@@ -109,7 +109,7 @@ func main() {
 	http.HandleFunc("/api/auth/validate-session", authHandlerAPI.ValidateSession)
 	http.HandleFunc("/api/auth/refresh-login", authHandlerAPI.RefreshLoginCsrfToken)
 	http.Handle("/admin", adminOnly(http.HandlerFunc(adminPage)))
-	http.Handle("/api/admin/connections/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/api/admin/connections", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGetConnections(platformDB, w, r)
 	})))
 	http.Handle("/api/admin/connections/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,7 @@ func main() {
 	http.Handle("/api/admin/connections/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteConnection(platformDB, w, r)
 	})))
-	http.Handle("/api/admin/groups/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/api/admin/groups", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGetGroups(platformDB, w, r)
 	})))
 	http.Handle("/api/admin/groups/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func main() {
 	http.Handle("/api/admin/groups/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeleteGroup(platformDB, w, r)
 	})))
-	http.Handle("/api/admin/permissions/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/api/admin/permissions", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGetPermissions(platformDB, w, r)
 	})))
 	http.Handle("/api/admin/permissions/grant", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func main() {
 	http.Handle("/api/admin/permissions/delete", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleDeletePermission(platformDB, w, r)
 	})))
-	http.Handle("/api/admin/users/get", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/api/admin/users", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		admin.HandleGetUsers(platformDB, w, r)
 	})))
 	http.Handle("/api/admin/users/add", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
