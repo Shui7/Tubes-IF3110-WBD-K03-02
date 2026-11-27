@@ -42,8 +42,9 @@ const DefaultMaxPendingPerDatabase = 100
 var (
 	ErrQueueFull = errors.New("the migration queue for this database is full")
 	ErrNotFound  = errors.New("job not found")
-	// ErrNotResumable is returned by Resume for a job that is not in 'partial' state.
-	ErrNotResumable = errors.New("only a partial job can be resumed")
+	// ErrNotResumable is returned when a job is not a partial batch migration.
+	ErrNotResumable      = errors.New("only a partial batch migration can be resumed")
+	ErrResumeNotApproved = errors.New("batch continuation has not been fully approved")
 )
 
 type Job struct {
@@ -59,6 +60,7 @@ type Job struct {
 	SQLDown            string
 	Irreversible       bool
 	IrreversibleReason string
+	SQLSHA256          string
 	TargetExecutionID  sql.NullInt64
 	WorkflowRequestID  sql.NullInt64
 	Version            sql.NullInt64
@@ -118,7 +120,7 @@ func (s *Store) WithMaxPending(n int) *Store {
 	return s
 }
 
-const jobColumns = `id, database_id, kind, name, sql_text, COALESCE(sql_down,''), is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, workflow_request_id, version, status, attempt, max_attempts,
+const jobColumns = `id, database_id, kind, name, sql_text, COALESCE(sql_down,''), is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, workflow_request_id, version, sql_sha256, status, attempt, max_attempts,
 	run_after, worker_id, COALESCE(traceparent, ''), COALESCE(request_id, ''), requested_by,
 	last_error, last_sqlstate, created_at, started_at, finished_at,
 	mode, COALESCE(batch_size, 0), batches_committed, rows_committed,
@@ -128,8 +130,8 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanJob(row scanner) (Job, error) {
 	var j Job
-	err := row.Scan(&j.ID, &j.DatabaseID, &j.Kind, &j.Name, &j.SQL, &j.SQLDown, &j.Irreversible, &j.IrreversibleReason, &j.TargetExecutionID, &j.WorkflowRequestID, &j.Version, &j.Status,
-		&j.Attempt, &j.MaxAttempts, &j.RunAfter, &j.WorkerID, &j.Traceparent, &j.RequestID,
+	err := row.Scan(&j.ID, &j.DatabaseID, &j.Kind, &j.Name, &j.SQL, &j.SQLDown, &j.Irreversible, &j.IrreversibleReason, &j.TargetExecutionID, &j.WorkflowRequestID, &j.Version, &j.SQLSHA256,
+		&j.Status, &j.Attempt, &j.MaxAttempts, &j.RunAfter, &j.WorkerID, &j.Traceparent, &j.RequestID,
 		&j.RequestedBy, &j.LastError, &j.LastSQLState, &j.CreatedAt, &j.StartedAt, &j.FinishedAt,
 		&j.Mode, &j.BatchSize, &j.BatchesCommitted, &j.RowsCommitted,
 		&j.BatchTable, &j.BatchColumn)
@@ -365,20 +367,49 @@ func (s *Store) MarkPartial(ctx context.Context, id, message, sqlstate string) e
 	return err
 }
 
-// Resume puts a partial job back in the queue. The worker continues from the
-// last checkpoint and does not repeat committed batches. The attempt counter
-// starts again so the resumed run gets a full retry budget.
-func (s *Store) Resume(ctx context.Context, id string) (Job, error) {
+// ResumeApproved requeues a partial batch only when its new workflow request
+// is pending_queue and every required leader approved it.
+func (s *Store) ResumeApproved(ctx context.Context, id string, requestID int64, requesterName string) (Job, error) {
 	job, err := scanJob(s.db.QueryRowContext(ctx, `
-		UPDATE migration_jobs SET status = 'pending', attempt = 0, run_after = now(),
-			worker_id = NULL, heartbeat_at = NULL, last_error = NULL, last_sqlstate = NULL
-		WHERE id = $1 AND status = 'partial'
-		RETURNING `+jobColumns, id))
+		UPDATE migration_jobs j SET status = 'pending', attempt = 0, run_after = now(),
+			worker_id = NULL, heartbeat_at = NULL, last_error = NULL, last_sqlstate = NULL,
+			finished_at = NULL, workflow_request_id = $2, requested_by = $3
+		WHERE j.id = $1 AND j.status = 'partial' AND j.kind = 'up' AND j.mode = 'batch'
+		  AND j.holds_lock = TRUE
+		  AND EXISTS (
+			SELECT 1 FROM migration_change_requests req
+			WHERE req.id = $2 AND req.resume_job_id = j.id
+			  AND req.database_id = j.database_id AND req.status = 'pending_queue'
+			  AND req.requester_name = $3 AND req.action = j.kind AND req.mode = j.mode
+			  AND req.sql_up = j.sql_text AND req.sql_down = j.sql_down
+			  AND req.is_irreversible = j.is_irreversible
+			  AND COALESCE(req.irreversible_reason,'') = COALESCE(j.irreversible_reason,'')
+			  AND COALESCE(req.batch_size,0) = COALESCE(j.batch_size,0)
+			  AND COALESCE(req.batch_table,'') = COALESCE(j.batch_table,'')
+			  AND COALESCE(req.batch_column,'') = COALESCE(j.batch_column,'')
+			  AND req.target_execution_id IS NOT DISTINCT FROM j.target_execution_id
+			  AND EXISTS (SELECT 1 FROM migration_change_approvals a WHERE a.request_id=req.id)
+			  AND NOT EXISTS (
+				SELECT 1 FROM migration_change_approvals a
+				WHERE a.request_id=req.id AND a.decision <> 'approved'
+			  )
+		  )
+		RETURNING `+jobColumns, id, requestID, requesterName))
 	if errors.Is(err, sql.ErrNoRows) {
-		return Job{}, ErrNotResumable
+		var status string
+		if statusErr := s.db.QueryRowContext(ctx, `SELECT status FROM migration_jobs WHERE id=$1`, id).Scan(&status); statusErr != nil {
+			if errors.Is(statusErr, sql.ErrNoRows) || SQLState(statusErr) == "22P02" {
+				return Job{}, ErrNotFound
+			}
+			return Job{}, fmt.Errorf("check batch job for resume: %w", statusErr)
+		}
+		if status != "partial" {
+			return Job{}, ErrNotResumable
+		}
+		return Job{}, ErrResumeNotApproved
 	}
 	if err != nil {
-		return Job{}, fmt.Errorf("resume job: %w", err)
+		return Job{}, fmt.Errorf("resume approved batch job: %w", err)
 	}
 	return job, nil
 }

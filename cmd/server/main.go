@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -128,8 +127,7 @@ func main() {
 		admin.HandleDeleteUser(platformDB, w, r)
 	})))
 	http.Handle("GET /api/jobs/{id}", authMiddleware.RequireAuth(jobs.StatusHandler(jobStore, canViewDatabase)))
-	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(
-		requireCSRFHeader(jobs.ResumeHandler(jobStore, canViewDatabase, canEditDatabase))))
+	http.Handle("POST /api/jobs/{id}/resume", authMiddleware.RequireAuth(jobs.ResumeHandler(jobStore, platformDB)))
 	http.Handle("GET /api/databases/{id}/migrations/visibility", authMiddleware.RequireAuth(http.HandlerFunc(migrationVisibility)))
 	http.Handle("/databases", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
 	http.Handle("/databases/", authMiddleware.RequireAuth(http.HandlerFunc(databases)))
@@ -230,7 +228,7 @@ func databases(w http.ResponseWriter, r *http.Request) {
 
 	// Authorization: check user's access level for this specific database.
 	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
-	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, id)
+	level, err := authz.GetUserDatabaseAccess(r.Context(), platformDB, sess.UserID, id)
 	if err != nil || level == authz.AccessNone {
 		http.Error(w, "Forbidden: you do not have access to this database", http.StatusForbidden)
 		return
@@ -575,33 +573,8 @@ func canViewDatabase(r *http.Request, databaseID int) bool {
 	if sess == nil || platformDB == nil {
 		return false
 	}
-	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
+	level, err := authz.GetUserDatabaseAccess(r.Context(), platformDB, sess.UserID, databaseID)
 	return err == nil && level != authz.AccessNone
-}
-
-// canEditDatabase reports whether the logged-in user has view+edit access.
-func canEditDatabase(r *http.Request, databaseID int) bool {
-	sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
-	if sess == nil || platformDB == nil {
-		return false
-	}
-	level, err := authz.GetUserDatabaseAccess(platformDB, sess.UserID, databaseID)
-	return err == nil && level == authz.AccessEdit
-}
-
-// requireCSRFHeader protects state-changing JSON endpoints: the request must carry
-// the session's CSRF token in the X-CSRF-Token header.
-func requireCSRFHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sess, _ := r.Context().Value(auth.SessionContextKey).(*auth.Session)
-		token := r.Header.Get("X-CSRF-Token")
-		if sess == nil || sess.CSRFToken == "" ||
-			subtle.ConstantTimeCompare([]byte(token), []byte(sess.CSRFToken)) != 1 {
-			http.Error(w, "Forbidden: invalid CSRF token", http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func handleMigrationDecision(databaseID int, requestID int64, w http.ResponseWriter, r *http.Request) {
@@ -691,6 +664,17 @@ func executeApprovedMigration(ctx context.Context, request workflow.Request, app
 	}
 	if err := workflow.SetStatus(platformDB, request.ID, "pending_queue", approverID, approverName, "All required approvals received; enqueueing execution"); err != nil {
 		return jobs.Job{}, err
+	}
+	if request.ResumeJobID.Valid {
+		resumed, err := jobStore.ResumeApproved(ctx, request.ResumeJobID.String, request.ID, request.RequesterName)
+		if err != nil {
+			_ = workflow.SetStatus(platformDB, request.ID, "failed", approverID, approverName, err.Error())
+			return jobs.Job{}, err
+		}
+		slog.InfoContext(ctx, "migration.batch_resume_queued", "request_id", request.ID,
+			"job_id", resumed.ID, "database_id", resumed.DatabaseID,
+			"batches", resumed.BatchesCommitted)
+		return resumed, nil
 	}
 	sqlToRun := request.SQLUp
 	version := int64(0)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/dbmanager"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/managed"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 	"github.com/lib/pq"
 )
 
@@ -25,22 +26,22 @@ type Executor interface {
 	WasApplied(ctx context.Context, job Job, version int64) (bool, error)
 }
 
-// Validator re-checks a job right before execution (approval still valid,
-// version still next, user still has access, SQL hash unchanged, etc.).
-// Return an error wrapping ErrValidation to fail the job permanently.
-// TODO: Implement Validator
+// Validator re-checks a queued execution immediately before it is run.
 type Validator interface {
-	Validate(ctx context.Context, job Job) error
+	Validate(ctx context.Context, job workflow.ExecutionJob) error
 }
 
 type FailureRecorder interface {
 	RecordFailure(ctx context.Context, job Job, version int64, cause error) error
 }
 
-// NoopValidator accepts everything.
-type NoopValidator struct{}
+var ErrValidation = errors.New("job validation failed")
 
-func (NoopValidator) Validate(context.Context, Job) error { return nil }
+type unconfiguredValidator struct{}
+
+func (unconfiguredValidator) Validate(context.Context, workflow.ExecutionJob) error {
+	return fmt.Errorf("%w: execution validator is not configured", ErrValidation)
+}
 
 // ManagerExecutor uses the existing dbmanager history (db_platform_migrations in the target database).
 type ManagerExecutor struct {
@@ -157,10 +158,6 @@ func (e *ManagerExecutor) WasApplied(ctx context.Context, job Job, version int64
 	}
 	return migration.Status == "success" && migration.SQL == job.SQL, nil
 }
-
-// ErrValidation marks a job that must fail permanently because revalidation
-// before execution rejected it (approval revoked, version conflict, etc.).
-var ErrValidation = errors.New("job validation failed")
 
 // SQLState returns the PostgreSQL SQLSTATE code inside err, or "".
 func SQLState(err error) string {

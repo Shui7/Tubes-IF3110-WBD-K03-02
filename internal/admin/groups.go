@@ -22,17 +22,53 @@ func GetGroups(db *sql.DB) ([]web.GroupItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var groups []web.GroupItem
+	groupIndexes := make(map[int]int)
 	for rows.Next() {
 		var g web.GroupItem
 		if err := rows.Scan(&g.ID, &g.Name, &g.MemberCount, &g.LeaderID, &g.LeaderName); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		groupIndexes[g.ID] = len(groups)
 		groups = append(groups, g)
 	}
-	return groups, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	memberRows, err := db.Query(`
+		SELECT ug.group_id, u.id, u.username, COALESCE(NULLIF(u.name, ''), u.username)
+		FROM user_groups ug
+		JOIN users u ON u.id = ug.user_id
+		ORDER BY ug.group_id, u.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer memberRows.Close()
+	for memberRows.Next() {
+		var groupID int
+		var member web.GroupMemberItem
+		if err := memberRows.Scan(&groupID, &member.ID, &member.Username, &member.Name); err != nil {
+			return nil, err
+		}
+		if index, ok := groupIndexes[groupID]; ok {
+			group := &groups[index]
+			group.Members = append(group.Members, member)
+			if member.ID == group.LeaderID {
+				group.LeaderIsMember = true
+			}
+		}
+	}
+	if err := memberRows.Err(); err != nil {
+		return nil, err
+	}
+	return groups, nil
 }
 
 func SetGroupLeader(db *sql.DB, groupID, userID int) error {

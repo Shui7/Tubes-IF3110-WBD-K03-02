@@ -1,13 +1,17 @@
 package jobs
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/auth"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/authz"
 	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/observability"
+	"github.com/Shui7/Tubes-IF3110-WBD-K03-02/internal/workflow"
 )
 
 type jobResponse struct {
@@ -48,14 +52,25 @@ func StatusHandler(store *Store, canView func(r *http.Request, databaseID int) b
 	})
 }
 
-// ResumeHandler serves POST /api/jobs/{id}/resume: it puts a partial batch job
-// back in the queue so the worker continues from the last checkpoint.
-// Unknown jobs and jobs the user cannot see return 404, users without edit
-// access get 403, and a job that is not partial gets 409.
-func ResumeHandler(store *Store, canView, canEdit func(r *http.Request, databaseID int) bool) http.Handler {
+// ResumeHandler serves POST /api/jobs/{id}/resume by submitting a new approval
+// request. The job remains partial until every required group leader approves.
+// Unknown/hidden jobs return 404, users without edit access get 403, and
+// non-partial or non-batch jobs get 409.
+func ResumeHandler(store *Store, platformDB *sql.DB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if platformDB == nil {
+			slog.ErrorContext(r.Context(), "job.resume_approval_unavailable")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		session, ok := r.Context().Value(auth.SessionContextKey).(*auth.Session)
+		if !ok || session == nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			return
+		}
+
 		job, err := store.Get(r.Context(), r.PathValue("id"))
-		if errors.Is(err, ErrNotFound) || (err == nil && !canView(r, job.DatabaseID)) {
+		if errors.Is(err, ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 			return
 		}
@@ -63,22 +78,41 @@ func ResumeHandler(store *Store, canView, canEdit func(r *http.Request, database
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			return
 		}
-		if !canEdit(r, job.DatabaseID) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "edit access required"})
-			return
-		}
-		resumed, err := store.Resume(r.Context(), job.ID)
-		if errors.Is(err, ErrNotResumable) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-			return
-		}
+
+		level, err := authz.GetUserDatabaseAccess(r.Context(), platformDB, session.UserID, job.DatabaseID)
 		if err != nil {
+			slog.ErrorContext(r.Context(), "job.resume_access_check_failed", "job_id", job.ID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			return
 		}
-		slog.InfoContext(r.Context(), "job.resumed", "job_id", resumed.ID, "database_id", resumed.DatabaseID,
-			"batches", resumed.BatchesCommitted)
-		writeJSON(w, http.StatusAccepted, toResponse(resumed))
+		if level == authz.AccessNone {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+			return
+		}
+		if level != authz.AccessEdit {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "edit access required"})
+			return
+		}
+		if job.Status != StatusPartial || job.Mode != ModeBatch || job.Kind != "up" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": ErrNotResumable.Error()})
+			return
+		}
+		request, err := workflow.CreateResumeRequest(platformDB, job.ID, session.UserID, session.Name)
+		if err != nil {
+			slog.WarnContext(r.Context(), "job.resume_approval_request_failed", "job_id", job.ID, "error", err)
+			if errors.Is(err, workflow.ErrResumeRequestPending) || errors.Is(err, workflow.ErrResumeNotEligible) {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not submit continuation for approval"})
+			return
+		}
+		slog.InfoContext(r.Context(), "job.resume_approval_requested", "job_id", job.ID,
+			"database_id", job.DatabaseID, "request_id", request.ID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"job_id": job.ID, "database_id": job.DatabaseID,
+			"request_id": request.ID, "status": "pending_review",
+		})
 	})
 }
 

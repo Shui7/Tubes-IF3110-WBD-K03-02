@@ -164,8 +164,9 @@
                                     <input type="hidden" name="csrf_token" value="{{ $.CSRFToken }}">
                                     <input type="hidden" name="group_id" value="{{ .ID }}">
                                     <select name="leader_user_id" required>
+                                        <option value="" disabled {{ if and (ne $group.LeaderID 0) (not $group.LeaderIsMember) }}selected{{ end }}>Choose a group member</option>
                                         <option value="0" {{ if eq $group.LeaderID 0 }}selected{{ end }}>No leader</option>
-                                        {{ range $.Users }}
+                                        {{ range $group.Members }}
                                         <option value="{{ .ID }}" {{ if eq $group.LeaderID .ID }}selected{{ end }}>{{ .Name }} ({{ .Username }})</option>
                                         {{ end }}
                                     </select>

@@ -51,7 +51,7 @@ func NewWorker(store *Store, exec Executor, validator Validator, cfg WorkerConfi
 		cfg.BaseBackoff = 2 * time.Second
 	}
 	if validator == nil {
-		validator = NoopValidator{}
+		validator = unconfiguredValidator{}
 	}
 	return &Worker{cfg: cfg, store: store, exec: exec, validator: validator}
 }
@@ -148,10 +148,14 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 
 	// Revalidate right before running.
 	_, valSpan := tracer.Start(jobCtx, "revalidation")
-	if err := w.validator.Validate(jobCtx, job); err != nil {
+	if err := w.validator.Validate(jobCtx, workflowExecution(job)); err != nil {
 		observability.RecordError(valSpan, err)
 		valSpan.End()
 		slog.WarnContext(ctx, "revalidation.result", "job_id", job.ID, "ok", false, "error", err)
+		if IsTransient(err) || jobCtx.Err() != nil {
+			w.finish(ctx, jobCtx, job, err)
+			return
+		}
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		w.recordFailure(sctx, job, err)
 		cancel()
@@ -198,6 +202,17 @@ func (w *Worker) process(parent context.Context, job Job, claimStart, claimEnd t
 		"duration_ms", time.Since(started).Milliseconds(), "ok", execErr == nil)
 
 	w.finish(ctx, jobCtx, job, execErr)
+}
+
+func workflowExecution(job Job) workflow.ExecutionJob {
+	return workflow.ExecutionJob{
+		ID: job.ID, DatabaseID: job.DatabaseID, Kind: job.Kind, Mode: job.Mode,
+		BatchSize: job.BatchSize, BatchTable: job.BatchTable, BatchColumn: job.BatchColumn,
+		SQL: job.SQL, SQLDown: job.SQLDown, SQLSHA256: job.SQLSHA256,
+		Irreversible: job.Irreversible, IrreversibleReason: job.IrreversibleReason,
+		TargetExecutionID: job.TargetExecutionID, WorkflowRequestID: job.WorkflowRequestID,
+		Version: job.Version, RequestedBy: job.RequestedBy,
+	}
 }
 
 // finish records the outcome. State updates use a context that survives

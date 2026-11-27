@@ -41,11 +41,19 @@ type DBConnectionItem struct {
 }
 
 type GroupItem struct {
-	ID          int
-	Name        string
-	MemberCount int
-	LeaderID    int
-	LeaderName  string
+	ID             int
+	Name           string
+	MemberCount    int
+	LeaderID       int
+	LeaderName     string
+	LeaderIsMember bool
+	Members        []GroupMemberItem
+}
+
+type GroupMemberItem struct {
+	ID       int
+	Username string
+	Name     string
 }
 
 type UserItem struct {

@@ -142,11 +142,16 @@ var migrations = []string{
 		batch_size INT,
 		batch_table TEXT,
 		batch_column TEXT,
+		resume_job_id UUID,
 		status TEXT NOT NULL CHECK (status IN ('draft', 'pending_review', 'approved', 'pending_queue', 'running', 'success', 'failed', 'rejected', 'partial')),
 		error_message TEXT,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+	"ALTER TABLE migration_change_requests ADD COLUMN IF NOT EXISTS resume_job_id UUID",
+	`CREATE UNIQUE INDEX IF NOT EXISTS migration_change_requests_active_resume_job
+		ON migration_change_requests (resume_job_id)
+		WHERE resume_job_id IS NOT NULL AND status IN ('pending_review', 'approved', 'pending_queue', 'running')`,
 	`CREATE TABLE IF NOT EXISTS migration_change_approvals (
 		id BIGSERIAL PRIMARY KEY,
 		request_id BIGINT NOT NULL REFERENCES migration_change_requests(id) ON DELETE CASCADE,

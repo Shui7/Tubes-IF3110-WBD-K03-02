@@ -33,6 +33,7 @@ type Request struct {
 	BatchTable         string
 	BatchColumn        string
 	TargetExecutionID  sql.NullInt64
+	ResumeJobID        sql.NullString
 	Status             string
 	Error              sql.NullString
 	CreatedAt          time.Time
@@ -105,46 +106,9 @@ func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, actio
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`
-		SELECT DISTINCT g.id, g.name, g.leader_user_id, COALESCE(NULLIF(u.name, ''), u.username, '')
-		FROM group_database_access gda
-		JOIN groups g ON g.id = gda.group_id
-		LEFT JOIN users u ON u.id = g.leader_user_id
-		WHERE COALESCE(gda.database_id, gda.db_id) = $1
-		ORDER BY g.id`, databaseID)
+	required, err := loadRequiredApprovals(tx, databaseID)
 	if err != nil {
-		return Request{}, fmt.Errorf("load database access groups: %w", err)
-	}
-	type requiredApproval struct {
-		groupID int
-		group   string
-		leader  sql.NullInt64
-		name    string
-	}
-	var required []requiredApproval
-	for rows.Next() {
-		var approval requiredApproval
-		if err := rows.Scan(&approval.groupID, &approval.group, &approval.leader, &approval.name); err != nil {
-			rows.Close()
-			return Request{}, fmt.Errorf("scan approval group: %w", err)
-		}
-		required = append(required, approval)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return Request{}, fmt.Errorf("iterate approval groups: %w", err)
-	}
-	rows.Close()
-	if len(required) == 0 {
-		return Request{}, errors.New("database has no access groups; configure at least one group and leader before requesting a migration")
-	}
-	for _, approval := range required {
-		if !approval.leader.Valid {
-			return Request{}, fmt.Errorf("group %q does not have an assigned leader", approval.group)
-		}
-		if approval.name == "" {
-			return Request{}, fmt.Errorf("leader for group %q could not be found", approval.group)
-		}
+		return Request{}, err
 	}
 
 	var request Request
@@ -250,12 +214,12 @@ func GetRequest(db *sql.DB, requestID int64) (Request, error) {
 	err := db.QueryRow(`
 		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
 		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, mode, COALESCE(batch_size,0),
-	       COALESCE(batch_table,''), COALESCE(batch_column,''), status, error_message, created_at
+	       COALESCE(batch_table,''), COALESCE(batch_column,''), status, error_message, created_at, resume_job_id
 		FROM migration_change_requests WHERE id=$1`, requestID).Scan(
 		&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action,
 		&request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason,
 		&request.TargetExecutionID, &request.Mode, &request.BatchSize, &request.BatchTable, &request.BatchColumn,
-		&request.Status, &request.Error, &request.CreatedAt)
+		&request.Status, &request.Error, &request.CreatedAt, &request.ResumeJobID)
 	if err != nil {
 		return Request{}, err
 	}
