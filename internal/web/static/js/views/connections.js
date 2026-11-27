@@ -147,6 +147,10 @@ export async function renderConnectionsTab() {
     addConnectionHeader.textContent = "Add PostgreSQL Connection"
     addConnectionFormCard.append(addConnectionHeader)
 
+    let errorAddDiv = createErrorDiv()
+    let successAddDiv = createSuccessDiv()
+    addConnectionFormCard.append(errorAddDiv, successAddDiv)
+
     let addConnectionForm = document.createElement("form")
     addConnectionForm.method = "POST"
     addConnectionForm.action = "/admin/connections/add"
@@ -249,8 +253,8 @@ export async function renderConnectionsTab() {
 
     addConnectionForm.addEventListener("submit", async function (event) {
         event.preventDefault()
-        errorDiv.hidden = true
-        successDiv.hidden = true
+        errorAddDiv.hidden = true
+        successAddDiv.hidden = true
 
         const host = hostInput.value.trim();
         const port = portInput.value.trim();
@@ -259,8 +263,8 @@ export async function renderConnectionsTab() {
         const password = databasePasswordInput.value.trim();
 
         if (!host || !port || !database || !password || !username) {
-            errorDiv.textContent = "All fields are required."
-            errorDiv.hidden = false
+            errorAddDiv.textContent = "All fields are required."
+            errorAddDiv.hidden = false
             return
         }
 
@@ -280,11 +284,11 @@ export async function renderConnectionsTab() {
         
         if (!response.ok) {
             const errorMessage = await response.text();
-            errorDiv.textContent = errorMessage || "Failed to add database connection."
-            errorDiv.hidden = false
+            errorAddDiv.textContent = errorMessage || "Failed to add database connection."
+            errorAddDiv.hidden = false
         } else {
-            successDiv.textContent = "Database connection added successfully."
-            successDiv.hidden = false
+            successAddDiv.textContent = "Database connection added successfully."
+            successAddDiv.hidden = false
             renderConnectionsTab()
         }
     })
