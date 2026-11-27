@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 
@@ -55,7 +56,36 @@ func (e *ManagerExecutor) Execute(ctx context.Context, job Job, version int64) e
 	if err != nil {
 		return err
 	}
-	return m.ExecuteMigration(ctx, version, job.SQL, job.RequestedBy)
+	switch job.Kind {
+	case "", "up":
+		return m.ExecuteMigrationDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy)
+	case "rollback":
+		if !job.TargetExecutionID.Valid {
+			return errors.New("queued rollback has no target execution ID")
+		}
+		target, err := m.GetMigrationExecution(ctx, job.TargetExecutionID.Int64)
+		if err != nil {
+			return err
+		}
+		if target.SQLDown != job.SQL {
+			return errors.New("queued rollback SQL differs from the immutable migration definition")
+		}
+		return m.RollbackMigration(ctx, job.TargetExecutionID.Int64, job.RequestedBy)
+	case "forward":
+		if !job.TargetExecutionID.Valid {
+			return errors.New("queued forward has no target execution ID")
+		}
+		target, err := m.GetMigrationExecution(ctx, job.TargetExecutionID.Int64)
+		if err != nil {
+			return err
+		}
+		if target.SQL != job.SQL {
+			return errors.New("queued forward SQL differs from the immutable migration definition")
+		}
+		return m.ForwardMigration(ctx, job.TargetExecutionID.Int64, job.RequestedBy)
+	default:
+		return fmt.Errorf("unsupported migration job kind %q", job.Kind)
+	}
 }
 
 // WasApplied checks whether a successful migration with the same version
@@ -65,6 +95,19 @@ func (e *ManagerExecutor) WasApplied(ctx context.Context, job Job, version int64
 	m, err := e.Registry.Get(ctx, job.DatabaseID)
 	if err != nil {
 		return false, err
+	}
+	if job.Kind == "rollback" || job.Kind == "forward" {
+		migrations, err := m.ListMigrations(ctx)
+		if err != nil {
+			return false, err
+		}
+		for i := len(migrations) - 1; i >= 0; i-- {
+			migration := migrations[i]
+			if migration.Version == version && migration.Action == job.Kind && migration.TargetExecutionID.Valid && job.TargetExecutionID.Valid && migration.TargetExecutionID.Int64 == job.TargetExecutionID.Int64 {
+				return migration.Status == "success", nil
+			}
+		}
+		return false, nil
 	}
 	migration, err := m.GetMigration(ctx, version)
 	if errors.Is(err, sql.ErrNoRows) {

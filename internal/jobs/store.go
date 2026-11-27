@@ -47,24 +47,29 @@ var (
 )
 
 type Job struct {
-	ID          string // same as execution_id
-	DatabaseID  int
-	Kind        string
-	Mode        string // "plain" or "batch"
-	BatchSize   int    // rows per batch (batch mode only)
-	BatchTable  string // "batch by attribute": table (or schema.table); empty = custom $1/$2 SQL
-	BatchColumn string // "batch by attribute": unique, unchanging column
-	Name        string
-	SQL         string
-	Version     sql.NullInt64
-	Status      Status
-	Attempt     int
-	MaxAttempts int
-	RunAfter    time.Time
-	WorkerID    sql.NullString
-	Traceparent string
-	RequestID   string
-	RequestedBy string
+	ID                 string // same as execution_id
+	DatabaseID         int
+	Kind               string
+	Mode               string // "plain" or "batch"
+	BatchSize          int    // rows per batch (batch mode only)
+	BatchTable         string // "batch by attribute": table (or schema.table); empty = custom $1/$2 SQL
+	BatchColumn        string // "batch by attribute": unique, unchanging column
+	Name               string
+	SQL                string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	TargetExecutionID  sql.NullInt64
+	WorkflowRequestID  sql.NullInt64
+	Version            sql.NullInt64
+	Status             Status
+	Attempt            int
+	MaxAttempts        int
+	RunAfter           time.Time
+	WorkerID           sql.NullString
+	Traceparent        string
+	RequestID          string
+	RequestedBy        string
 	// Progress mirror for the API/SPA. The authoritative copy is the checkpoint
 	// table in the target database.
 	BatchesCommitted int
@@ -77,16 +82,22 @@ type Job struct {
 }
 
 type EnqueueRequest struct {
-	DatabaseID  int
-	Kind        string // "up" (default), "rollback", "forward"
-	Mode        string // "plain" (default) or "batch"
-	BatchSize   int    // required for batch mode, 1..MaxBatchSize
-	BatchTable  string // optional: with BatchColumn, the platform builds the cursor logic
-	BatchColumn string // optional: unique, unchanging column, e.g. id
-	Name        string
-	SQL         string
-	RequestedBy string
-	RequestID   string
+	DatabaseID         int
+	Kind               string // "up" (default), "rollback", "forward"
+	Mode               string // "plain" (default) or "batch"
+	BatchSize          int    // required for batch mode, 1..MaxBatchSize
+	BatchTable         string // optional: with BatchColumn, the platform builds the cursor logic
+	BatchColumn        string // optional: unique, unchanging column, e.g. id
+	Name               string
+	SQL                string
+	SQLDown            string
+	Irreversible       bool
+	IrreversibleReason string
+	TargetExecutionID  int64
+	WorkflowRequestID  int64
+	Version            int64
+	RequestedBy        string
+	RequestID          string
 }
 
 type Store struct {
@@ -107,7 +118,7 @@ func (s *Store) WithMaxPending(n int) *Store {
 	return s
 }
 
-const jobColumns = `id, database_id, kind, name, sql_text, version, status, attempt, max_attempts,
+const jobColumns = `id, database_id, kind, name, sql_text, COALESCE(sql_down,''), is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, workflow_request_id, version, status, attempt, max_attempts,
 	run_after, worker_id, COALESCE(traceparent, ''), COALESCE(request_id, ''), requested_by,
 	last_error, last_sqlstate, created_at, started_at, finished_at,
 	mode, COALESCE(batch_size, 0), batches_committed, rows_committed,
@@ -117,7 +128,7 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanJob(row scanner) (Job, error) {
 	var j Job
-	err := row.Scan(&j.ID, &j.DatabaseID, &j.Kind, &j.Name, &j.SQL, &j.Version, &j.Status,
+	err := row.Scan(&j.ID, &j.DatabaseID, &j.Kind, &j.Name, &j.SQL, &j.SQLDown, &j.Irreversible, &j.IrreversibleReason, &j.TargetExecutionID, &j.WorkflowRequestID, &j.Version, &j.Status,
 		&j.Attempt, &j.MaxAttempts, &j.RunAfter, &j.WorkerID, &j.Traceparent, &j.RequestID,
 		&j.RequestedBy, &j.LastError, &j.LastSQLState, &j.CreatedAt, &j.StartedAt, &j.FinishedAt,
 		&j.Mode, &j.BatchSize, &j.BatchesCommitted, &j.RowsCommitted,
@@ -155,9 +166,15 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (Job, error) {
 	if kind == "" {
 		kind = "up"
 	}
+	if kind != "up" && kind != "rollback" && kind != "forward" {
+		return Job{}, fmt.Errorf("unknown migration job kind %q", kind)
+	}
 	mode := req.Mode
 	if mode == "" {
 		mode = ModePlain
+	}
+	if kind != "up" && mode != ModePlain {
+		return Job{}, errors.New("rollback and forward jobs must use plain mode")
 	}
 	req.BatchTable = strings.TrimSpace(req.BatchTable)
 	req.BatchColumn = strings.TrimSpace(req.BatchColumn)
@@ -196,11 +213,14 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (Job, error) {
 
 	job, err := scanJob(tx.QueryRowContext(ctx, `
 		INSERT INTO migration_jobs
-			(id, database_id, kind, name, sql_text, sql_sha256, traceparent, request_id, requested_by,
+			(id, database_id, kind, name, sql_text, sql_down, is_irreversible, irreversible_reason,
+			 target_execution_id, workflow_request_id, version, sql_sha256, traceparent, request_id, requested_by,
 			 mode, batch_size, batch_table, batch_column)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,0), NULLIF($10,0), NULLIF($11,0),
+			 $12, $13, $14, $15, $16, $17, NULLIF($18,''), NULLIF($19,''))
 		RETURNING `+jobColumns,
-		id, req.DatabaseID, kind, req.Name, req.SQL, hex.EncodeToString(sum[:]),
+		id, req.DatabaseID, kind, req.Name, req.SQL, req.SQLDown, req.Irreversible, req.IrreversibleReason,
+		req.TargetExecutionID, req.WorkflowRequestID, req.Version, hex.EncodeToString(sum[:]),
 		nullIfEmpty(observability.InjectTraceparent(ctx)), nullIfEmpty(req.RequestID), req.RequestedBy,
 		mode, sql.NullInt64{Int64: int64(req.BatchSize), Valid: mode == ModeBatch},
 		nullIfEmpty(req.BatchTable), nullIfEmpty(req.BatchColumn)))
@@ -407,6 +427,11 @@ CREATE TABLE IF NOT EXISTS migration_jobs (
     mode          TEXT NOT NULL DEFAULT 'plain' CHECK (mode IN ('plain','batch')),
     name          TEXT NOT NULL DEFAULT '',
     sql_text      TEXT NOT NULL,
+    sql_down      TEXT NOT NULL DEFAULT '',
+    is_irreversible BOOLEAN NOT NULL DEFAULT FALSE,
+    irreversible_reason TEXT,
+    target_execution_id BIGINT,
+    workflow_request_id BIGINT,
     sql_sha256    TEXT NOT NULL,
     version       BIGINT,                           -- migration version chosen by the worker
     status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
@@ -427,12 +452,24 @@ CREATE TABLE IF NOT EXISTS migration_jobs (
     finished_at   TIMESTAMPTZ
 );
 
+-- Approval and migration-definition columns are added for existing queues too.
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS sql_down TEXT NOT NULL DEFAULT '';
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS is_irreversible BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS irreversible_reason TEXT;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS target_execution_id BIGINT;
+ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS workflow_request_id BIGINT;
+
 -- Batch mode columns (added with ALTER so existing databases are upgraded too).
 ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_size INT;
 ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batches_committed INT NOT NULL DEFAULT 0;
 ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS rows_committed BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_table TEXT;
 ALTER TABLE migration_jobs ADD COLUMN IF NOT EXISTS batch_column TEXT;
+
+-- Older queue installations may have the original status constraint.
+ALTER TABLE migration_jobs DROP CONSTRAINT IF EXISTS migration_jobs_status_check;
+ALTER TABLE migration_jobs ADD CONSTRAINT migration_jobs_status_check CHECK (status IN
+    ('pending','running','success','failed','partial','uncertain','partially_reverted'));
 
 -- At most one job per database may hold the lock (across workers and across batches).
 CREATE UNIQUE INDEX IF NOT EXISTS one_lock_per_db ON migration_jobs(database_id) WHERE holds_lock;

@@ -317,6 +317,7 @@
                                     {{ range .Events }}<li><strong>{{ .Status }}</strong> — {{ .ActorName }} — {{ .OccurredAt }}: {{ .Note }}</li>{{ end }}
                                 </ol>
                                 {{ if eq $request.Action "up" }}
+                                <p><strong>Mode:</strong> {{ $request.Mode }}{{ if eq $request.Mode "batch" }} (size {{ $request.BatchSize }}){{ if $request.BatchTable }}; table {{ $request.BatchTable }}, cursor {{ $request.BatchColumn }}{{ end }}{{ end }}</p>
                                 <p><strong>SQL up</strong></p><pre class="mono">{{ $request.SQLUp }}</pre>
                                 {{ if $request.Irreversible }}<p><strong>Irreversible:</strong> {{ $request.IrreversibleReason }}</p>{{ else }}<p><strong>SQL down</strong></p><pre class="mono">{{ $request.SQLDown }}</pre>{{ end }}
                                 {{ else if eq $request.Action "rollback" }}
@@ -339,6 +340,23 @@
                 <h3>Submit Migration for Approval</h3>
                 <form method="POST" action="/databases/{{ .Database.ID }}/migrations">
                     <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
+
+                    <div class="form-group">
+                        <label for="migration_mode">Execution mode</label>
+                        <select id="migration_mode" name="mode">
+                            <option value="plain">Plain migration</option>
+                            <option value="batch">Batch migration</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="batch-options" hidden>
+                        <label for="batch_size">Batch size</label>
+                        <input id="batch_size" name="batch_size" type="number" min="1" max="100000" value="1000">
+                        <label for="batch_table">Batch table (optional, for batch-by-attribute)</label>
+                        <input id="batch_table" name="batch_table" placeholder="public.big_items">
+                        <label for="batch_column">Unique cursor column</label>
+                        <input id="batch_column" name="batch_column" placeholder="id">
+                        <p class="muted">For attribute mode, use {{"{{batch_filter}}"}} in SQL up. Otherwise write a cursor query using $1 (last cursor) and $2 (batch size).</p>
+                    </div>
 
                     <div class="form-group">
                         <label for="migration_sql_up">SQL up</label>
@@ -421,6 +439,15 @@
             }
             irreversible.addEventListener('change', updateDefinitionFields);
             updateDefinitionFields();
+        })();
+
+        (function () {
+            const mode = document.getElementById('migration_mode');
+            const options = document.getElementById('batch-options');
+            if (!mode || !options) return;
+            function updateBatchOptions() { options.hidden = mode.value !== 'batch'; }
+            mode.addEventListener('change', updateBatchOptions);
+            updateBatchOptions();
         })();
 
         (function () {

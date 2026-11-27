@@ -144,6 +144,10 @@ type MigrationChangeRequestItem struct {
 	SQLDown            string
 	Irreversible       bool
 	IrreversibleReason string
+	Mode               string
+	BatchSize          int
+	BatchTable         string
+	BatchColumn        string
 	Error              string
 	CreatedAt          string
 	Approvals          []MigrationApprovalItem

@@ -66,7 +66,11 @@ CREATE TABLE IF NOT EXISTS migration_change_requests (
     is_irreversible BOOLEAN NOT NULL DEFAULT FALSE,
     irreversible_reason TEXT,
     target_execution_id BIGINT,
-    status TEXT NOT NULL CHECK (status IN ('draft', 'pending_review', 'approved', 'pending_queue', 'running', 'success', 'failed', 'rejected')),
+    mode TEXT NOT NULL DEFAULT 'plain' CHECK (mode IN ('plain', 'batch')),
+    batch_size INT,
+    batch_table TEXT,
+    batch_column TEXT,
+    status TEXT NOT NULL CHECK (status IN ('draft', 'pending_review', 'approved', 'pending_queue', 'running', 'success', 'failed', 'rejected', 'partial')),
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

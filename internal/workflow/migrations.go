@@ -28,6 +28,10 @@ type Request struct {
 	SQLDown            string
 	Irreversible       bool
 	IrreversibleReason string
+	Mode               string
+	BatchSize          int
+	BatchTable         string
+	BatchColumn        string
 	TargetExecutionID  sql.NullInt64
 	Status             string
 	Error              sql.NullString
@@ -43,12 +47,38 @@ type Event struct {
 	OccurredAt time.Time
 }
 
-func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, action, sqlUp, sqlDown string, irreversible bool, reason string, targetID int64) (Request, error) {
+func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, action, sqlUp, sqlDown string, irreversible bool, reason string, targetID int64, mode string, batchSize int, batchTable, batchColumn string) (Request, error) {
 	if databaseID < 1 || requesterID < 1 || strings.TrimSpace(requesterName) == "" {
 		return Request{}, errors.New("database and requester are required")
 	}
 	if action != "up" && action != "rollback" && action != "forward" {
 		return Request{}, errors.New("invalid migration action")
+	}
+	if mode == "" {
+		mode = "plain"
+	}
+	if mode != "plain" && mode != "batch" {
+		return Request{}, errors.New("migration mode must be plain or batch")
+	}
+	if action != "up" && mode != "plain" {
+		return Request{}, errors.New("rollback and forward requests must use plain mode")
+	}
+	if mode == "batch" {
+		if batchSize < 1 || batchSize > 100000 {
+			return Request{}, errors.New("batch size must be between 1 and 100000")
+		}
+		if (batchTable == "") != (batchColumn == "") {
+			return Request{}, errors.New("batch by attribute needs both a table and a column")
+		}
+		if batchTable != "" {
+			if strings.Contains(batchColumn, ".") || strings.Count(batchTable, ".") > 1 || !strings.Contains(sqlUp, "{{batch_filter}}") {
+				return Request{}, errors.New("batch-by-attribute SQL needs a table, a plain unique column, and {{batch_filter}}")
+			}
+		} else if !strings.Contains(sqlUp, "$1") || !strings.Contains(sqlUp, "$2") {
+			return Request{}, errors.New("custom batch SQL must use $1 for the cursor and $2 for batch size")
+		}
+	} else {
+		batchSize, batchTable, batchColumn = 0, "", ""
 	}
 	if action == "up" {
 		if strings.TrimSpace(sqlUp) == "" {
@@ -120,11 +150,11 @@ func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, actio
 	var request Request
 	err = tx.QueryRow(`
 		INSERT INTO migration_change_requests
-			(database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, irreversible_reason, target_execution_id, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,0),'draft')
-		RETURNING id, database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at`,
-		databaseID, requesterID, requesterName, action, sqlUp, sqlDown, irreversible, reason, targetID,
-	).Scan(&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action, &request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason, &request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt)
+			(database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, irreversible_reason, target_execution_id, mode, batch_size, batch_table, batch_column, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,0),$10,$11,NULLIF($12,''),NULLIF($13,''),'draft')
+		RETURNING id, database_id, requester_user_id, requester_name, action, sql_up, sql_down, is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, mode, batch_size, COALESCE(batch_table,''), COALESCE(batch_column,''), status, error_message, created_at`,
+		databaseID, requesterID, requesterName, action, sqlUp, sqlDown, irreversible, reason, targetID, mode, batchSize, batchTable, batchColumn,
+	).Scan(&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action, &request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason, &request.TargetExecutionID, &request.Mode, &request.BatchSize, &request.BatchTable, &request.BatchColumn, &request.Status, &request.Error, &request.CreatedAt)
 	if err != nil {
 		return Request{}, fmt.Errorf("create migration approval request: %w", err)
 	}
@@ -154,7 +184,8 @@ func CreateRequest(db *sql.DB, databaseID, requesterID int, requesterName, actio
 func ListRequests(db *sql.DB, databaseID, userID int) ([]Request, error) {
 	rows, err := db.Query(`
 		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
-		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at
+		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, mode, COALESCE(batch_size,0),
+	       COALESCE(batch_table,''), COALESCE(batch_column,''), status, error_message, created_at
 		FROM migration_change_requests WHERE database_id=$1 ORDER BY id DESC`, databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("list migration requests: %w", err)
@@ -165,7 +196,8 @@ func ListRequests(db *sql.DB, databaseID, userID int) ([]Request, error) {
 		var request Request
 		if err := rows.Scan(&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName,
 			&request.Action, &request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason,
-			&request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt); err != nil {
+			&request.TargetExecutionID, &request.Mode, &request.BatchSize, &request.BatchTable, &request.BatchColumn,
+			&request.Status, &request.Error, &request.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan migration request: %w", err)
 		}
 		approvals, err := db.Query(`
@@ -217,11 +249,13 @@ func GetRequest(db *sql.DB, requestID int64) (Request, error) {
 	var request Request
 	err := db.QueryRow(`
 		SELECT id, database_id, requester_user_id, requester_name, action, sql_up, sql_down,
-		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, status, error_message, created_at
+		       is_irreversible, COALESCE(irreversible_reason,''), target_execution_id, mode, COALESCE(batch_size,0),
+	       COALESCE(batch_table,''), COALESCE(batch_column,''), status, error_message, created_at
 		FROM migration_change_requests WHERE id=$1`, requestID).Scan(
 		&request.ID, &request.DatabaseID, &request.RequesterID, &request.RequesterName, &request.Action,
 		&request.SQLUp, &request.SQLDown, &request.Irreversible, &request.IrreversibleReason,
-		&request.TargetExecutionID, &request.Status, &request.Error, &request.CreatedAt)
+		&request.TargetExecutionID, &request.Mode, &request.BatchSize, &request.BatchTable, &request.BatchColumn,
+		&request.Status, &request.Error, &request.CreatedAt)
 	if err != nil {
 		return Request{}, err
 	}
@@ -292,14 +326,16 @@ func Respond(db *sql.DB, requestID int64, userID int, userName, decision, commen
 }
 
 func SetStatus(db *sql.DB, requestID int64, status string, actorID int, actorName, note string) error {
-	var expected string
+	var allowed string
 	switch status {
 	case "pending_queue":
-		expected = "approved"
+		allowed = "status IN ('approved', 'partial')"
 	case "running":
-		expected = "pending_queue"
-	case "success", "failed":
-		expected = "running"
+		allowed = "status IN ('pending_queue', 'running', 'partial')"
+	case "success", "partial":
+		allowed = "status='running'"
+	case "failed":
+		allowed = "status IN ('pending_queue', 'running')"
 	default:
 		return fmt.Errorf("invalid workflow transition to %q", status)
 	}
@@ -310,8 +346,8 @@ func SetStatus(db *sql.DB, requestID int64, status string, actorID int, actorNam
 	defer tx.Rollback()
 	result, err := tx.Exec(`
 		UPDATE migration_change_requests
-		SET status=$1, error_message=CASE WHEN $1='failed' THEN NULLIF($2,'') ELSE NULL END, updated_at=NOW()
-		WHERE id=$3 AND status=$4`, status, note, requestID, expected)
+		SET status=$1, error_message=CASE WHEN $1 IN ('failed','partial') THEN NULLIF($2,'') ELSE NULL END, updated_at=NOW()
+		WHERE id=$3 AND `+allowed, status, note, requestID)
 	if err != nil {
 		return err
 	}

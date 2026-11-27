@@ -157,10 +157,17 @@ func (m *Manager) ExecuteBatch(ctx context.Context, executionID string, batchNo 
 	return BatchStep{Cursor: next, Rows: rows}, nil
 }
 
-// RecordMigrationSuccess writes the history row for a migration whose data was
-// changed by batches. It is idempotent: if the same version with the same SQL is
-// already recorded as success, it does nothing.
+// RecordMigrationSuccess preserves the legacy API for callers which do not
+// provide a reversible definition. New migration jobs should call
+// RecordMigrationSuccessDefinition with the approved SQL up/down pair.
 func (m *Manager) RecordMigrationSuccess(ctx context.Context, version int64, migrationSQL, executedBy string) error {
+	return m.RecordMigrationSuccessDefinition(ctx, version, migrationSQL, "", true,
+		"Legacy batch migration call has no SQL down definition.", executedBy)
+}
+
+// RecordMigrationSuccessDefinition writes the history row for a migration whose
+// data was changed by batches. It is idempotent for the same immutable definition.
+func (m *Manager) RecordMigrationSuccessDefinition(ctx context.Context, version int64, migrationSQL, sqlDown string, irreversible bool, irreversibleReason, executedBy string) error {
 	if version < 1 {
 		return errors.New("migration version must be positive")
 	}
@@ -169,6 +176,16 @@ func (m *Manager) RecordMigrationSuccess(ctx context.Context, version int64, mig
 	}
 	if strings.TrimSpace(executedBy) == "" {
 		return errors.New("migration executor is required")
+	}
+	if irreversible {
+		if strings.TrimSpace(irreversibleReason) == "" {
+			return errors.New("irreversible migration reason is required")
+		}
+		sqlDown = ""
+	} else if strings.TrimSpace(sqlDown) == "" {
+		return errors.New("SQL down is required unless the migration is marked irreversible")
+	} else {
+		irreversibleReason = ""
 	}
 	if err := m.EnsureMigrationTable(ctx); err != nil {
 		return err
@@ -184,15 +201,25 @@ func (m *Manager) RecordMigrationSuccess(ctx context.Context, version int64, mig
 		return fmt.Errorf("lock migration history: %w", err)
 	}
 
-	var recorded bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM db_platform_migrations
-		               WHERE version = $1 AND status = 'success' AND sql_text = $2)`,
-		version, migrationSQL).Scan(&recorded); err != nil {
-		return fmt.Errorf("check migration record: %w", err)
-	}
-	if recorded {
-		return nil
+	var oldUp, oldDown string
+	var oldIrreversible bool
+	var oldReason sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT sql_text, sql_down, is_irreversible, irreversible_reason
+		FROM db_platform_migrations WHERE version=$1 ORDER BY id LIMIT 1`, version).
+		Scan(&oldUp, &oldDown, &oldIrreversible, &oldReason)
+	if err == nil {
+		if oldUp != migrationSQL || oldDown != sqlDown || oldIrreversible != irreversible || oldReason.String != irreversibleReason {
+			return fmt.Errorf("migration version %d already has an immutable definition", version)
+		}
+		var recorded bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM db_platform_migrations WHERE version=$1 AND status='success')`, version).Scan(&recorded); err != nil {
+			return fmt.Errorf("check migration record: %w", err)
+		}
+		if recorded {
+			return nil
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check migration definition: %w", err)
 	}
 
 	var latest int64
@@ -204,8 +231,10 @@ func (m *Manager) RecordMigrationSuccess(ctx context.Context, version int64, mig
 		return fmt.Errorf("migration version must be %d, got %d", latest+1, version)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO db_platform_migrations (version, sql_text, executed_by, status)
-		VALUES ($1, $2, $3, 'success')`, version, migrationSQL, executedBy); err != nil {
+		INSERT INTO db_platform_migrations
+			(version, sql_text, executed_sql, sql_down, is_irreversible, irreversible_reason, executed_by, status)
+		VALUES ($1, $2, $2, $3, $4, NULLIF($5,''), $6, 'success')`,
+		version, migrationSQL, sqlDown, irreversible, irreversibleReason, executedBy); err != nil {
 		return fmt.Errorf("record migration %d: %w", version, err)
 	}
 	if err := tx.Commit(); err != nil {

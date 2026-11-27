@@ -65,7 +65,7 @@ func (e *ManagerExecutor) Complete(ctx context.Context, job Job, version int64) 
 	if err != nil {
 		return err
 	}
-	return m.RecordMigrationSuccess(ctx, version, job.SQL, job.RequestedBy)
+	return m.RecordMigrationSuccessDefinition(ctx, version, job.SQL, job.SQLDown, job.Irreversible, job.IrreversibleReason, job.RequestedBy)
 }
 
 // validateBatchRequest checks the mode and batch settings of an enqueue request.
@@ -104,6 +104,12 @@ func validateBatchRequest(mode string, size int, sqlText, table, column string) 
 	default:
 		return fmt.Errorf("unknown migration mode %q", mode)
 	}
+}
+
+// ValidateBatchRequest exposes batch input validation to the approval form so
+// malformed jobs are rejected before a leader is asked to approve them.
+func ValidateBatchRequest(mode string, size int, sqlText, table, column string) error {
+	return validateBatchRequest(mode, size, sqlText, table, column)
 }
 
 // processBatch runs a batch job: batch after batch, each in its own transaction,
@@ -227,6 +233,7 @@ func (w *Worker) finishBatch(ctx, jobCtx context.Context, job Job, p BatchProgre
 		}
 		slog.InfoContext(ctx, "job.finished", "job_id", job.ID, "status", StatusSuccess,
 			"batches", p.Batches, "rows", p.Rows)
+		w.updateWorkflowStatus(ctx, job, "success", "Batch migration completed")
 
 	case jobCtx.Err() != nil:
 		if parentDone(ctx) {
@@ -261,4 +268,5 @@ func (w *Worker) stopBatch(sctx, logCtx context.Context, job Job, cause error) {
 	}
 	slog.ErrorContext(logCtx, "job.partial", "job_id", job.ID, "batches", job.BatchesCommitted,
 		"rows", job.RowsCommitted, "sqlstate", SQLState(cause), "error", cause)
+	w.updateWorkflowStatus(logCtx, job, "partial", msg)
 }
