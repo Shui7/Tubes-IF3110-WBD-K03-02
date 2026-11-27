@@ -16,7 +16,6 @@ export async function renderDatabases() {
     container.replaceChildren()
 
     const databaseContainer = document.createElement("div")
-    databaseContainer.classList.add("narrow")
     container.append(databaseContainer)
 
     const headerDiv = document.createElement("div")
