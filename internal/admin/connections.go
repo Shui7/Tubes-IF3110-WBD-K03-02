@@ -162,7 +162,8 @@ func HandleAddConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.Redirect(w, r, "/admin#connections", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func HandleDeleteConnection(db *sql.DB, w http.ResponseWriter, r *http.Request) {

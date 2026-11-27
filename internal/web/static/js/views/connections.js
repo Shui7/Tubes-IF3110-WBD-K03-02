@@ -254,10 +254,11 @@ export async function renderConnectionsTab() {
 
         const host = hostInput.value.trim();
         const port = portInput.value.trim();
-        const database = databaseUsernameInput.value.trim();
+        const database = databaseInput.value.trim();
+        const username = databaseUsernameInput.value.trim();
         const password = databasePasswordInput.value.trim();
 
-        if (!host || !port || !database || !password) {
+        if (!host || !port || !database || !password || !username) {
             errorDiv.textContent = "All fields are required."
             errorDiv.hidden = false
             return
@@ -272,6 +273,7 @@ export async function renderConnectionsTab() {
                 host: host,
                 port: port,
                 database: database,
+                user: username,
                 password: password
             })
         })
