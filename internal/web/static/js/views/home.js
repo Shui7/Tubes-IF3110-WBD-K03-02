@@ -7,7 +7,9 @@ export async function renderHome() {
         return
     }
 
-    renderLoading()
+    setTitle("Home")
+    await renderLoading()
+    renderNavRight()
     
     const container = document.getElementById("content")
     container.innerHTML = ""

@@ -10,6 +10,7 @@ export async function renderDatabases() {
 
     setTitle("Databases")
     await renderLoading()
+    renderNavRight()
 
     const container = document.getElementById("content")
     container.replaceChildren()

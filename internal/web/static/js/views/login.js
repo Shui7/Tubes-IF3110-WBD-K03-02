@@ -9,7 +9,7 @@ export async function renderLoginView() {
     }
 
     setTitle("Log in")
-    renderLoading()
+    await renderLoading()
     refreshLoginCsrfToken()
     renderNavRight()
 
