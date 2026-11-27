@@ -146,7 +146,8 @@ function activateTab(link, updateUrl) {
 function updateActiveNavigation(pathname) {
     document.querySelectorAll(".nav-links a[href]").forEach((link) => {
         const linkPath = new URL(link.href, window.location.href).pathname
-        link.classList.toggle("active", linkPath === pathname)
+        const isDatabaseDetail = linkPath === "/databases" && /^\/databases\/\d+\/?$/.test(pathname)
+        link.classList.toggle("active", linkPath === pathname || isDatabaseDetail)
     })
 }
 
