@@ -161,3 +161,22 @@ The per-database lock is stored in the platform database as the `holds_lock` col
 - **Graceful shutdown (SIGTERM).** The job is returned to the queue without consuming an attempt, and the lock stays held.
 - **Ambiguous commit** (connection lost during `COMMIT`). The job is immediately treated as `uncertain` and follows the same evidence check.
 - **No double commit.** The unique lock index prevents two workers from running on the same database, and a retry happens only after evidence confirms the SQL was not committed.
+
+## Migration plain vs batch
+
+Done by doing an update migration for bulk database
+
+Plain:
+```
+UPDATE bulk_orders SET score = score + 1;
+```
+
+Batch (batch-table=bulk_orders; column=id):
+```
+UPDATE bulk_orders SET score = score + 1 WHERE {{batch_filter}};
+```
+
+| Scenario | Rows      | Batch size | Number of batches | Duration  |
+|----------|-----------|------------|-------------------|------------------------|
+| Plain    | 3,000,000 | -          | -                 | 22627 ms                    |
+| Batched  | 3,000,000 | 1,000      | 3,000             | 39764 ms                    |

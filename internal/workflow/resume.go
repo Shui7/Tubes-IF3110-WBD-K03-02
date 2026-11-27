@@ -44,7 +44,10 @@ func loadRequiredApprovals(tx *sql.Tx, databaseID int) ([]requiredApproval, erro
 		return nil, fmt.Errorf("iterate approval groups: %w", err)
 	}
 	if len(required) == 0 {
-		return nil, errors.New("database has no access groups; configure at least one access group before requesting a migration")
+		return []requiredApproval{{
+			group: "No access groups configured",
+			name:  "Admin fallback (leader unassigned)",
+		}}, nil
 	}
 	for i := range required {
 		approval := &required[i]
