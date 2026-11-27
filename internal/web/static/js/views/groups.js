@@ -431,12 +431,12 @@ async function renderPermissionsTable(groupsTab) {
 
 export async function fetchGroups() {
     const response = await fetch('/api/admin/groups');
-    const data = await response.json().catch({"groups": []})
+    const data = await response.json().catch(() => ({"groups": []}))
     return data.groups
 }
 
 export async function fetchPermissions() {
     const response = await fetch('/api/admin/permissions');
-    const data = await response.json().catch({"permissions": []})
+    const data = await response.json().catch(() => ({"permissions": []}))
     return data.permissions
 }

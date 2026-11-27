@@ -288,6 +288,6 @@ export async function renderConnectionsTab() {
 
 export async function fetchConnections() {
     const response = await fetch('/api/admin/connections');
-    const data = await response.json().catch({"connections": []})
+    const data = await response.json().catch(() => ({"connections": []}))
     return data.connections
 }

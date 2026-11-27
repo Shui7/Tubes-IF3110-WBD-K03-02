@@ -302,6 +302,6 @@ export async function renderUsersTab() {
 
 export async function fetchUsers() {
     const response = await fetch('/api/admin/users');
-    const data = await response.json().catch({"users": []})
+    const data = await response.json().catch(() => ({"users": []}))
     return data.users
 }

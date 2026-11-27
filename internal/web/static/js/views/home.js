@@ -13,7 +13,7 @@ export async function renderHome() {
     container.innerHTML = ""
 
     const response = await fetch('/api/auth/me');
-    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
+    const data = await response.json().catch(() => ({"name": "", "role": "", "inSession": false}))
 
     let welcomeBackMessage = document.createElement("h1")
     let nameText = document.createElement("strong")

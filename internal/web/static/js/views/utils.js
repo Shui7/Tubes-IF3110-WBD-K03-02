@@ -72,6 +72,6 @@ export async function renderErrorView(errorCode, errorTitle, errorMessage) {
 
 export async function validateSession() {
     const response = await fetch('/api/auth/me')
-    const data = await response.json().catch({"inSession": false})
+    const data = await response.json().catch(() => ({"inSession": false}))
     return data.inSession
 }

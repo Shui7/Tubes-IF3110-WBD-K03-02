@@ -25,7 +25,7 @@ export async function renderAdminView() {
     headerDiv.append(headerText)
 
     const response = await fetch('/api/auth/me');
-    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
+    const data = await response.json().catch(() => ({"name": "", "role": "", "inSession": false}))
 
     if (data.role !== "Admin") {
         let errorDiv = createErrorDiv("You do not have permission to access this page.")

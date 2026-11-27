@@ -1,4 +1,5 @@
 import {createErrorDiv, createSuccessDiv, setTitle} from "./components.js"
+import { renderHome } from "./home.js"
 import {apiFetch, renderLoading, setCsrfToken, validateSession} from "./utils.js"
 
 export async function renderLoginView() {
@@ -22,7 +23,7 @@ export async function renderLoginView() {
     let headerDiv = document.createElement("div")
     headerDiv.classList.add("page-header", "text-center")
     loginContainer.append(headerDiv)
-    
+
     let headerText = document.createElement("h1")
     headerText.appendChild(document.createTextNode("Sign In"))
     headerDiv.append(headerText)
@@ -121,6 +122,7 @@ export async function renderLoginView() {
             passwordInput.value = "";
             setCsrfToken(data.csrfToken)
             renderNavRight()
+            renderHome()
 
             window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));
@@ -142,14 +144,14 @@ export async function renderNavRight() {
     container.innerHTML = ""
 
     const response = await fetch('/api/auth/me');
-    const data = await response.json().catch({"name": "", "role": "", "inSession": false})
+    const data = await response.json().catch(() => ({"name": "", "role": "", "inSession": false}))
 
     let nameSpan = document.createElement("span")
     nameSpan.classList.add("muted", "mono")
     nameSpan.textContent = data.name + " (" + data.role + ")"
     container.append(nameSpan)
 
-    if (inSession) {
+    if (data.inSession) {
         let logoutButton = document.createElement("button")
         logoutButton.type = "submit"
         logoutButton.id = "logout-button"
@@ -162,7 +164,7 @@ export async function renderNavRight() {
             const response = await apiFetch('/api/auth/logout', {
                 method: 'POST',
             });
-            const data = await response.json().catch({"csrfToken":""})
+            const data = await response.json().catch(() => ({"csrfToken":""}))
             setCsrfToken(data.csrfToken)
             renderNavRight()
             await renderLoginView()
@@ -187,6 +189,6 @@ export async function renderNavRight() {
 
 async function refreshLoginCsrfToken() {
     const response = await fetch("api/auth/refresh-login")
-    const data = await response.json().catch({"csrfToken":""})
+    const data = await response.json().catch(() => ({"csrfToken":""}))
     setCsrfToken(data.csrfToken)
 }
