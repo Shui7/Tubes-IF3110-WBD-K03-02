@@ -42,7 +42,7 @@ export async function renderAdminView() {
     connectionsTab.classList.add("tab-link")
     connectionsTab.textContent = "Database Conections"
     connectionsTab.dataTab = "connections"
-    connectionsTab.onclick(async (event) => {
+    connectionsTab.addEventListener("click", async (event) => {
         event.preventDefault()
         connectionsTab.classList.add("active")
         groupsTab.classList.remove("active")
@@ -54,7 +54,7 @@ export async function renderAdminView() {
     groupsTab.classList.add("tab-link")
     groupsTab.textContent = "User Groups"
     groupsTab.dataTab = "groups"
-    groupsTab.onclick(async (event) => {
+    groupsTab.addEventListener("click", async (event) => {
         event.preventDefault()
         connectionsTab.classList.remove("active")
         groupsTab.classList.add("active")
@@ -66,7 +66,7 @@ export async function renderAdminView() {
     usersTab.classList.add("tab-link")
     usersTab.textContent = "Users"
     usersTab.dataTab = "users"
-    usersTab.onclick(async (event) => {
+    usersTab.addEventListener("click", async (event) => {
         event.preventDefault()
         connectionsTab.classList.remove("active")
         groupsTab.classList.remove("active")
